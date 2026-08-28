@@ -15,7 +15,9 @@
 # container-local ones.
 services:
   panel:
-    image: ghcr.io/anefzaoui/minecraft-server-manager:latest
+    # This fork publishes its own image when main is updated. Override MSM_IMAGE
+    # if you want to pin a release or temporarily switch back to upstream.
+    image: ${MSM_IMAGE:-ghcr.io/gleep52/minecraft-server-manager:latest}
     container_name: minecraft-server-manager
     restart: unless-stopped
     ports:

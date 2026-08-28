@@ -5,6 +5,29 @@ All notable changes to this project are documented here. The format is based on
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Each push is cut as a new release with
 its own dated entry.
 
+## [0.10.0] - 2026-08-28
+
+### Added
+
+- Added an admin-only, per-server **Wizard Chat** integration for OpenAI-compatible endpoints,
+  including Ollama on another LAN host. Each server can use its own URL, model, API key, system
+  prompt, enabled state, and transcript-retention period.
+- Players can invoke the configured persona with `@wizard`. This first phase is conversation-only:
+  model output is sent back through the server chat and cannot execute gameplay commands.
+- Admins can discover available models (with free-text model names as a fallback), test a
+  configuration, and inspect retained transcripts. Transcript history remains available after a
+  Minecraft server is removed and is pruned according to that server's retention setting.
+- The Compose file now defaults to this fork's GHCR image and supports an `MSM_IMAGE` override for
+  pinned or alternate builds.
+
+### Fixed / Security
+
+- Wizard credentials are encrypted at rest, all configuration and transcripts are admin-only, and
+  endpoint validation permits ordinary LAN LLM hosts while blocking link-local metadata and other
+  unsafe reserved destinations.
+- Fixed path containment for dangling in-root symlinks on platforms whose temporary-directory path
+  has an operating-system alias (for example `/var` and `/private/var` on macOS).
+
 ## [0.9.8] - 2026-08-21
 
 Account security lands: opt-in two-factor authentication for every account, plus a round of

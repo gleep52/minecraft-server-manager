@@ -126,6 +126,13 @@ function handleLine(serverId, line) {
     } catch (err) {
       console.error(`[chat-commands] ${serverId}:`, err.message);
     }
+    try {
+      require('../services/wizard')
+        .handleChat(serverId, evt.player, evt.message)
+        .catch((err) => console.error(`[wizard] ${serverId}:`, err.message));
+    } catch (err) {
+      console.error(`[wizard] ${serverId}:`, err.message);
+    }
   }
 }
 

@@ -34,6 +34,21 @@ function realBaseOf(base) {
   return real;
 }
 
+/** Canonicalize the existing prefix of a path, preserving any missing tail. */
+function realPathWithMissingTail(candidate) {
+  let anchor = candidate;
+  for (;;) {
+    try {
+      const realAnchor = fs.realpathSync.native(anchor);
+      return path.resolve(realAnchor, path.relative(anchor, candidate));
+    } catch {
+      const parent = path.dirname(anchor);
+      if (parent === anchor) return candidate;
+      anchor = parent;
+    }
+  }
+}
+
 /**
  * Reject a symlink escape the lexical check above can't see: find the deepest
  * component of `resolved` that exists on disk, resolve it through any symlinks,
@@ -73,7 +88,11 @@ function assertRealContainment(base, resolved, attempted) {
   } catch {
     try {
       const parentReal = fs.realpathSync.native(path.dirname(dir));
-      realDir = path.resolve(parentReal, fs.readlinkSync(dir));
+      // An absolute dangling target may itself use an OS alias such as macOS's
+      // /var -> /private/var. Canonicalize its deepest existing ancestor before
+      // comparing it to realBase, otherwise a legitimate in-base target is
+      // falsely treated as an escape merely because the spellings differ.
+      realDir = realPathWithMissingTail(path.resolve(parentReal, fs.readlinkSync(dir)));
     } catch {
       return; // vanished between checks — the caller's own op will fail
     }

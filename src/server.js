@@ -85,6 +85,7 @@ function startBackgroundServices(httpServer) {
   function runMaintenance() {
     try {
       const r = require('./analytics/ingest').pruneOlderThan(ANALYTICS_RETENTION_DAYS);
+      require('./services/wizard').pruneTranscripts();
       if (r.events || r.sessions) {
         console.log(
           `[maintenance] pruned ${r.events} timeline rows, ${r.sessions} sessions older than ${ANALYTICS_RETENTION_DAYS}d`

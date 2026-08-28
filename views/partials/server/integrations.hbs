@@ -1,5 +1,66 @@
 <div class="grid gap-4 lg:grid-cols-2" id="ig-root" data-server-id="{{server.id}}" data-invite="{{json integrations.invite}}">
 
+  {{#if integrations.wizard}}
+  <div class="card p-4 lg:col-span-2" id="ig-wizard">
+    <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <h3 class="flex items-center gap-2 font-semibold">{{{icon 'sparkles' 'size-4 text-link'}}} Wizard chatbot</h3>
+        <p class="mt-1 text-xs text-ink-faint">Players invoke the conversational wizard with <code class="rounded bg-inset px-1">@wizard</code>. Configuration and transcripts are visible only to admins.</p>
+      </div>
+      <span class="msm-toggle"><input type="checkbox" id="ig-wz-enabled" {{#if integrations.wizard.enabled}}checked{{/if}}><span></span></span>
+    </div>
+
+    <div class="grid gap-4 lg:grid-cols-2">
+      <div class="space-y-4">
+        <div>
+          <label class="label" for="ig-wz-url">OpenAI-compatible base URL</label>
+          <input class="input font-mono text-xs" id="ig-wz-url" value="{{integrations.wizard.baseUrl}}" placeholder="http://192.168.1.50:11434">
+          <p class="help">Ollama works with its host and port; <code class="rounded bg-inset px-1">/v1</code> is added automatically. LAN/private addresses are supported.</p>
+        </div>
+        <div>
+          <label class="label" for="ig-wz-model">Model</label>
+          <div class="flex gap-2">
+            <input class="input min-w-0 flex-1 font-mono text-xs" id="ig-wz-model" list="ig-wz-models" value="{{integrations.wizard.model}}" placeholder="llama3.2:latest">
+            <datalist id="ig-wz-models"></datalist>
+            <button class="btn shrink-0" id="ig-wz-models-load">Discover</button>
+          </div>
+          <p class="help">Discovery fills suggestions; free text always remains available.</p>
+        </div>
+        <div>
+          <label class="label" for="ig-wz-key">API key <span class="font-normal text-ink-faint">(optional)</span></label>
+          <input class="input font-mono text-xs" type="password" id="ig-wz-key" autocomplete="new-password" placeholder="{{#if integrations.wizard.hasApiKey}}Stored securely — leave blank to keep{{else}}Not required by default Ollama installs{{/if}}">
+          {{#if integrations.wizard.hasApiKey}}
+            <label class="mt-2 flex items-center gap-2 text-xs"><input type="checkbox" class="msm-check" id="ig-wz-key-clear"> Remove stored key on save</label>
+          {{/if}}
+        </div>
+        <div>
+          <label class="label" for="ig-wz-retention">Transcript retention</label>
+          <div class="flex items-center gap-2">
+            <input class="input w-28" type="number" id="ig-wz-retention" min="0" max="3650" value="{{integrations.wizard.retentionDays}}">
+            <span class="text-sm text-ink-soft">days</span>
+          </div>
+          <p class="help">Default 7. Set 0 to store no transcripts. Existing transcripts remain associated with deleted servers until this period expires.</p>
+        </div>
+      </div>
+
+      <div>
+        <label class="label" for="ig-wz-prompt">Wizard persona and system prompt</label>
+        <textarea class="input min-h-72 font-mono text-xs leading-5" id="ig-wz-prompt" maxlength="12000">{{integrations.wizard.systemPrompt}}</textarea>
+        <p class="help">This is sent as the system message for this server. Gameplay tools are intentionally unavailable in phase one.</p>
+      </div>
+    </div>
+
+    <div class="mt-4 flex flex-wrap items-center gap-2">
+      <button class="btn btn-primary" id="ig-wz-save">Save wizard</button>
+      <button class="btn" id="ig-wz-test">Test connection</button>
+      <button class="btn" id="ig-wz-transcripts">View this server's transcripts</button>
+      <a class="btn btn-ghost" href="/wizard-transcripts">All transcript archives</a>
+      <span class="hidden text-xs text-warn" data-ig-dirty="wz">Unsaved changes</span>
+    </div>
+    <div class="mt-4 hidden max-h-80 overflow-auto rounded-md border border-line bg-inset p-3 text-xs" id="ig-wz-transcript-list"></div>
+  </div>
+  {{/if}}
+
   <div class="card p-4">
     <div class="mb-4 flex items-center justify-between gap-3">
       <h3 class="flex items-center gap-2 font-semibold">{{{icon 'webhook' 'size-4 text-link'}}} Discord notifications</h3>

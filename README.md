@@ -167,8 +167,9 @@ yourself only if you want to control it (e.g. to share one across replicas).
 
 ### Run the panel itself in Docker
 
-A pre-built multi-arch image (amd64 + arm64) is published to GHCR on every release:
-`ghcr.io/anefzaoui/minecraft-server-manager:latest` (or pin a version tag, e.g. `:v0.9.0`).
+A pre-built multi-arch image (amd64 + arm64) is published to GHCR when this fork's `main` branch is
+updated: `ghcr.io/gleep52/minecraft-server-manager:latest`. Set `MSM_IMAGE` to pin a version tag or
+temporarily use another image.
 Grab the [docker-compose.yml](docker-compose.yml) from the repo root, set **one** variable, and start:
 
 ```bash
@@ -218,6 +219,7 @@ host.docker.internal:host-gateway` (Docker Engine 20.10+) for the fallback path;
 | --------------------------------------------------------------------------- | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `DATA_DIR`                                                                  | `./data`                   | Root for **all** panel state (DB, server data, backups, library).                                                                                                                                                                                                                                        |
 | `DATA_DIR_HOST`                                                             | = `DATA_DIR`               | Only when the panel runs **in a container**: the absolute host path of the `DATA_DIR` mount, used to re-root bind mounts for the host daemon.                                                                                                                                                            |
+| `MSM_IMAGE`                                                                 | this fork's `latest`       | Image used by `docker-compose.yml`; set this to an immutable version tag for a pinned deployment or to another registry/repository when needed.                                                                                                                                                          |
 | `MAP_PROXY_HOST`                                                            | see note                   | Address the panel uses to reach sibling containers' host-published ports (currently just the live map). `127.0.0.1` bare metal; auto-switches to `host.docker.internal` when `DATA_DIR_HOST` is set (containerized panel — needs `extra_hosts`, see above). Override for rootless Docker/remote daemons. |
 | `PANEL_HOST` / `PANEL_PORT`                                                 | `127.0.0.1` / `25564`      | Web UI bind address + port. Localhost-only by default; set `PANEL_HOST=0.0.0.0` for LAN access.                                                                                                                                                                                                          |
 | `SESSION_SECRET`                                                            | auto-generated             | Signs session cookies + derives the at-rest encryption key. Auto-created and persisted if unset.                                                                                                                                                                                                         |
