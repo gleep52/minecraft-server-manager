@@ -111,12 +111,12 @@
         <div>
           <label class="label" for="ig-wz-controllers">Power controllers</label>
           <textarea class="input min-h-28 font-mono text-xs" id="ig-wz-controllers" placeholder="Gleep52">{{{joinLines integrations.wizard.powerControllers}}}</textarea>
-          <p class="help">Only these exact players may affect another online player. Add them to Minecraft testers too if they should retain self/world powers.</p>
+          <p class="help">Only these exact players may affect another online player. Their gifts may use any valid item ID, but still obey the quantity limit. Add them to Minecraft testers too if they should retain self/world powers.</p>
         </div>
         <div>
           <label class="label" for="ig-wz-gifts">Allowed gifts</label>
           <textarea class="input min-h-28 font-mono text-xs" id="ig-wz-gifts">{{{joinLines integrations.wizard.giftItems}}}</textarea>
-          <p class="help">One namespaced item ID per line. The model cannot select anything else.</p>
+          <p class="help">One namespaced item ID per line. Restricts gifts that testers give themselves; power controllers may give other players any valid vanilla or modded item.</p>
         </div>
         <div class="space-y-3">
           <label class="flex items-center gap-2 text-sm"><input class="msm-check" type="checkbox" id="ig-wz-dry-run" {{#if integrations.wizard.powersDryRun}}checked{{/if}}> Dry run (audit only; change nothing)</label>

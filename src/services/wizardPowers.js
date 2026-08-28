@@ -206,13 +206,17 @@ function toolsFor(cfg, player, prompt = null) {
     add('teleport_self_to_player', 'Teleport the requesting player to another exact online player.', { target }, [
       'target',
     ]);
-  if (crossAllowed && cfg.powerFlags.gift && crossIntent.gift && cfg.giftItems.length)
+  if (crossAllowed && cfg.powerFlags.gift && crossIntent.gift)
     add(
       'give_player',
-      'Give an allowlisted item to another exact online player.',
+      'Give any valid namespaced Minecraft item to another exact online player. Use a vanilla minecraft: ID or the exact mod namespace and item ID.',
       {
         target,
-        item: { type: 'string', enum: cfg.giftItems },
+        item: {
+          type: 'string',
+          pattern: ITEM_RE.source,
+          description: 'Exact namespaced item ID, such as minecraft:red_bed or a_mod:item_name.',
+        },
         count: { type: 'integer', minimum: 1, maximum: cfg.giftMaxCount },
       },
       ['target', 'item', 'count']
@@ -283,12 +287,12 @@ function parseToolCall(message, cfg, player, prompt = null) {
       keys.some((key) => !['target', 'item', 'count'].includes(key)) ||
       keys.length !== 3 ||
       target.toLowerCase() === String(player).toLowerCase() ||
-      !cfg.giftItems.includes(item) ||
+      !ITEM_RE.test(item) ||
       !Number.isInteger(count) ||
       count < 1 ||
       count > cfg.giftMaxCount
     ) {
-      throw httpError(400, 'The Wizard requested a target, item, or quantity outside the allowlist');
+      throw httpError(400, 'The Wizard requested an invalid target, item ID, or quantity');
     }
     args = { target, item, count };
   }

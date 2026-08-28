@@ -5,6 +5,20 @@ All notable changes to this project are documented here. The format is based on
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Each push is cut as a new release with
 its own dated entry.
 
+## [0.14.1] - 2026-08-28
+
+### Changed
+
+- Power controllers may give another online player any syntactically valid namespaced vanilla or
+  modded item ID. The Allowed gifts list now applies only to tester self-gifts, so an administrator
+  can replace a player's lost item without editing server configuration first.
+
+### Security
+
+- Controller gifts still require the Gifts power flag, an exact online target other than the
+  caller, a strict registry-shaped item ID, the configured maximum quantity, the per-caller
+  cooldown, and the existing dry-run and audit controls. The model receives no raw RCON access.
+
 ## [0.14.0] - 2026-08-28
 
 ### Added

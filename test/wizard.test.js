@@ -220,6 +220,7 @@ test('power controllers receive only bounded cross-player tools with exact targe
   const controllerOnly = { ...cfg, powerTesters: [] };
   assert.deepEqual(names('heal me', controllerOnly), []);
   assert.deepEqual(names('heal PlayerA', controllerOnly), ['heal_player']);
+  assert.deepEqual(names('give PlayerA a red bed', { ...controllerOnly, giftItems: [] }), ['give_player']);
 
   const request = wizardPowers.parseToolCall(
     { tool_calls: [{ function: { name: 'teleport_player_to_self', arguments: '{"target":"@PlayerA"}' } }] },
@@ -244,6 +245,22 @@ test('power controllers receive only bounded cross-player tools with exact targe
     'give PlayerA four torches'
   );
   assert.deepEqual(gift.args, { target: 'PlayerA', item: 'minecraft:torch', count: 4 });
+  const unrestrictedGift = wizardPowers.parseToolCall(
+    {
+      tool_calls: [
+        {
+          function: {
+            name: 'give_player',
+            arguments: '{"target":"PlayerA","item":"minecraft:diamond","count":4}',
+          },
+        },
+      ],
+    },
+    cfg,
+    'Gleep52',
+    'give PlayerA four diamonds'
+  );
+  assert.deepEqual(unrestrictedGift.args, { target: 'PlayerA', item: 'minecraft:diamond', count: 4 });
   assert.throws(
     () =>
       wizardPowers.parseToolCall(
@@ -252,16 +269,16 @@ test('power controllers receive only bounded cross-player tools with exact targe
             {
               function: {
                 name: 'give_player',
-                arguments: '{"target":"PlayerA","item":"minecraft:diamond","count":4}',
+                arguments: '{"target":"PlayerA","item":"minecraft:diamond; op Gleep52","count":1}',
               },
             },
           ],
         },
         cfg,
         'Gleep52',
-        'give PlayerA four diamonds'
+        'give PlayerA a diamond'
       ),
-    /outside the allowlist/
+    /invalid target, item ID, or quantity/
   );
   assert.throws(
     () =>
