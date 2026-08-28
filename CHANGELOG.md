@@ -5,6 +5,19 @@ All notable changes to this project are documented here. The format is based on
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Each push is cut as a new release with
 its own dated entry.
 
+## [0.15.1] - 2026-08-28
+
+### Fixed
+
+- Integrated the final upstream Pull Request #11 merge (`e3c3d2a`). Modpack and ZIP imports now
+  derive mod-versus-plugin placement from the target server, retain blocked and missing entries in
+  reports, and skip known wrong-loader, wrong-kind, or wrong-version jars by default.
+- Bare CurseForge plugin slugs resolve against the Bukkit plugins class first, and plugin servers
+  no longer choose a newer Fabric build from hybrid Modrinth projects when a compatible plugin
+  build is available.
+- The Mods dialog initializes its loader before a prefilled search can run, removing a startup
+  ordering error.
+
 ## [0.15.0] - 2026-08-28
 
 ### Changed
