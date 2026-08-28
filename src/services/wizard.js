@@ -6,7 +6,9 @@ const dns = require('node:dns').promises;
 const db = require('../db');
 const secrets = require('./secrets');
 const chat = require('./chat');
+const servers = require('./servers');
 const wizardPowers = require('./wizardPowers');
+const wizardRecipes = require('./wizardRecipes');
 const httpError = require('../utils/httpError');
 const { PLAYER_NAME_RE } = require('../utils/playerName');
 
@@ -430,6 +432,21 @@ async function handleChat(serverId, player, message) {
   let exchangeRecorded = false;
   let powerAttempted = false;
   try {
+    const recipeReply = wizardRecipes.recipeReply(prompt, servers.getServer(serverId)?.mc_version);
+    if (recipeReply) {
+      insertTranscript(serverId, player, 'user', prompt);
+      insertTranscript(serverId, player, 'assistant', recipeReply);
+      exchangeRecorded = true;
+      await chat.sendChat(serverId, {
+        actor: cfg.invocationName,
+        target: '@a',
+        text: `[${label}] ${recipeReply}`,
+        color: 'light_purple',
+        italic: true,
+        preserveNewlines: true,
+      });
+      return true;
+    }
     const { message, cfg: powerCfg } = await completionMessage(serverId, player, prompt, { allowPowers: true });
     powerAttempted = Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
     let powerRequest;

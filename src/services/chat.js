@@ -55,11 +55,14 @@ async function assertRunning(serverId) {
   }
 }
 
+function normalizeMessageText(value, preserveNewlines = false) {
+  const text = String(value || '').replace(/\r\n?/g, '\n');
+  return (preserveNewlines ? text.replace(/\n{3,}/g, '\n\n') : text.replace(/\n+/g, ' ')).trim();
+}
+
 /** Send an admin chat message. Returns the sent message (for the panel's chat log). */
 async function sendChat(serverId, opts = {}) {
-  const text = String(opts.text || '')
-    .replace(/[\r\n]+/g, ' ')
-    .trim();
+  const text = normalizeMessageText(opts.text, opts.preserveNewlines === true);
   if (!text) throw httpError(400, 'Message text is required');
   if (text.length > 512) throw httpError(400, 'Message is too long (512 chars max)');
   const mode = opts.mode === 'say' ? 'say' : 'tellraw';
@@ -103,4 +106,4 @@ async function sendChat(serverId, opts = {}) {
   return { ...message, actor, ts: new Date().toISOString() };
 }
 
-module.exports = { sendChat, buildComponent, normalizeTarget, COLORS, FORMATS };
+module.exports = { sendChat, buildComponent, normalizeTarget, normalizeMessageText, COLORS, FORMATS };

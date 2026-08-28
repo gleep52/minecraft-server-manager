@@ -5,6 +5,27 @@ All notable changes to this project are documented here. The format is based on
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Each push is cut as a new release with
 its own dated entry.
 
+## [0.12.0] - 2026-08-28
+
+### Added
+
+- Recipe questions for vanilla items now bypass the LLM and use version-specific Minecraft recipe
+  data. The Wizard displays a compact 2×2 or 3×3 numbered grid plus an ingredient legend using real
+  line breaks in Minecraft chat.
+- Shapeless recipes use the same bounded visual format and are explicitly labeled as shapeless.
+
+### Fixed
+
+- Unknown and modded recipes are no longer guessed. The Wizard directs players to JEI/REI or the
+  vanilla recipe book when the panel cannot verify a recipe, and full item-name matching prevents a
+  modded item such as `allthemodium furnace` from falling back to the vanilla furnace recipe.
+
+### Security
+
+- Updated `brace-expansion`, `nanoid`, `postcss`, and `tar` to patched releases. The remaining npm
+  advisory is limited to UUID APIs that Dockerode does not call; Dockerode uses UUID v4 without a
+  caller-provided buffer.
+
 ## [0.11.3] - 2026-08-28
 
 ### Fixed
