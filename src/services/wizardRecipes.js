@@ -87,6 +87,22 @@ function requestedItem(prompt, data) {
   return matches[0]?.item || null;
 }
 
+function familyChoices(prompt, data) {
+  let text = normalizeWords(prompt);
+  for (const [alias, canonical] of Object.entries(ALIASES)) text = text.replaceAll(alias, canonical);
+  const target = requestedPhrase(text);
+  if (!target) return [];
+  const suffix = ` ${target}`;
+  return (data?.itemsArray || [])
+    .filter((item) => {
+      const name = normalizeWords(item.displayName || item.name);
+      const recipes = data.recipes?.[item.id];
+      return name.endsWith(suffix) && Array.isArray(recipes) && recipes.length > 0;
+    })
+    .map((item) => item.displayName || item.name)
+    .slice(0, 8);
+}
+
 function recipeItem(raw, data) {
   if (raw === null || raw === undefined) return null;
   let id = raw;
@@ -145,11 +161,21 @@ function recipeReply(prompt, version) {
   const recipe = Array.isArray(recipes)
     ? recipes.find((entry) => Array.isArray(entry.inShape)) || recipes.find((entry) => Array.isArray(entry.ingredients))
     : null;
-  if (!item || !recipe) {
+  if (!item) {
+    const choices = data ? familyChoices(text, data) : [];
+    if (choices.length) {
+      const last = choices.pop();
+      const list = choices.length ? `${choices.join(', ')}, or ${last}` : last;
+      return `Which kind? Try ${list}.`;
+    }
     const shownVersion = data?.version?.minecraftVersion || version || 'this Minecraft version';
     return `I cannot verify that crafting recipe for ${shownVersion}. For modded items, check JEI/REI; for vanilla items, use the recipe book.`;
+  }
+  if (!recipe) {
+    const shownVersion = data.version?.minecraftVersion || version || 'this Minecraft version';
+    return `${item.displayName || item.name} has no 2×2 or 3×3 crafting-grid recipe in ${shownVersion}. It may use another workstation, such as a smithing table.`;
   }
   return renderRecipe(item, recipe, data);
 }
 
-module.exports = { recipeReply, dataForVersion, requestedItem, renderRecipe };
+module.exports = { recipeReply, dataForVersion, requestedItem, familyChoices, renderRecipe };

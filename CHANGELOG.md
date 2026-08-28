@@ -5,6 +5,17 @@ All notable changes to this project are documented here. The format is based on
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Each push is cut as a new release with
 its own dated entry.
 
+## [0.12.1] - 2026-08-28
+
+### Fixed
+
+- Generic crafting requests now ask the player to choose a specific craftable variant. For example,
+  “craft a pickaxe” offers wooden, stone, golden, iron, and diamond pickaxes, while “craft an iron
+  pickaxe” displays the exact grid.
+- Known items without a 2×2 or 3×3 recipe now explain that another workstation may be required.
+  Unsupported pinned Minecraft versions remain explicit errors and never borrow recipes from a
+  different version.
+
 ## [0.12.0] - 2026-08-28
 
 ### Added
