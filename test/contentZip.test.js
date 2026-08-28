@@ -224,10 +224,15 @@ test('importForServer installs downloadable entries, reports blocked/missing, ho
     assert.ok(row);
     assert.equal(row.project_id, '100');
 
-    // Selections: deselect everything → nothing installs
+    // Selections: deselect everything → nothing installs, but missing/blocked
+    // status still outranks 'deselected' so the report shows the pack's gaps.
     const r2 = await contentZip.importForServer(sid, zip, { selections: [9999], actor: 'tester' });
     assert.equal(r2.installed.length, 0);
-    assert.equal(r2.skipped.length, 3);
+    assert.deepEqual(r2.skipped, [{ name: 'Alpha', reason: 'deselected' }]);
+    assert.equal(r2.blocked.length, 1);
+    assert.equal(r2.blocked[0].name, 'Bravo');
+    assert.equal(r2.failed.length, 1);
+    assert.match(r2.failed[0].reason, /no longer exists/);
   } finally {
     library.downloadToLibrary = realDownload;
     unstub();
@@ -260,6 +265,39 @@ test('importForServer installs a jar zip with metadata identities (registries do
     const row = db.get("SELECT * FROM server_content WHERE server_id = ? AND filename = 'alpha.jar'", sid);
     assert.equal(row.name, 'Alpha Mod');
     assert.equal(row.version, '1.0');
+  } finally {
+    unstub();
+    apiKeys.setKey('curseforge', 'test-key');
+  }
+});
+
+test('importForServer default (no selections) skips wrong-fit jars per the documented contract', async () => {
+  const sid = app.seedServer('srv_zipdefault');
+  db.run("UPDATE servers SET type = 'PAPER', mc_version = '1.20.1' WHERE id = ?", sid);
+  apiKeys.deleteKey('curseforge');
+  const { jarBuffer } = require('./helpers/zipfix');
+  const fabricJar = await jarBuffer({
+    'fabric.mod.json': JSON.stringify({ id: 'fabmod', name: 'Fabric Mod', version: '1.0' }),
+  });
+  const pluginJar = await jarBuffer({ 'plugin.yml': 'name: GoodPlugin\nversion: "2.0"\nmain: a.b.C\n' });
+  const zip = await tempZip('mixed.zip', { 'fabmod.jar': fabricJar, 'goodplugin.jar': pluginJar });
+
+  globalThis.fetch = (input) => {
+    const url = String(typeof input === 'string' ? input : input.url || input);
+    if (url.includes('api.modrinth.com')) return Promise.reject(new Error('registry down'));
+    return realFetch(input);
+  };
+  try {
+    const report = await contentZip.importForServer(sid, zip, { actor: 'tester' });
+    assert.equal(report.installed.length, 1);
+    assert.equal(report.installed[0].name, 'GoodPlugin');
+    assert.deepEqual(report.skipped, [{ name: 'fabmod.jar', reason: 'wrong-kind' }]);
+    assert.ok(fs.existsSync(dataPath('servers', sid, 'plugins', 'goodplugin.jar')));
+    assert.ok(!fs.existsSync(dataPath('servers', sid, 'plugins', 'fabmod.jar')), 'fabric mod never installs');
+    // Explicit selections still override the default judgement.
+    const forced = await contentZip.importForServer(sid, zip, { selections: ['fabmod.jar'], actor: 'tester' });
+    assert.equal(forced.installed.length, 1);
+    assert.deepEqual(forced.skipped, [{ name: 'goodplugin.jar', reason: 'deselected' }]);
   } finally {
     unstub();
     apiKeys.setKey('curseforge', 'test-key');

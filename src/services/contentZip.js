@@ -165,9 +165,7 @@ async function resolveManifestEntries(manifestFiles) {
  */
 async function previewForServer(serverId, zipPath) {
   const server = serverTarget(serverId);
-  const kind = ['PAPER', 'PURPUR', 'PUFFERFISH', 'LEAF', 'FOLIA', 'SPIGOT', 'BUKKIT', 'CANYON'].includes(server.type)
-    ? 'plugin'
-    : 'mod';
+  const kind = modsService.contentKindOf(server);
   const serverMc = server.mc_version;
   const serverLoader = modsService.loaderOf(server);
   const info = await inspect(zipPath);
@@ -357,7 +355,11 @@ async function importForServer(
   zipPath,
   { selections = null, applyOverrides = false, actor = 'system', onStep = () => {} } = {}
 ) {
-  serverTarget(serverId);
+  const server = serverTarget(serverId);
+  // Server-type-derived, like every other install path — a hardcoded 'mod'
+  // would file pack jars under mods/ on a Paper-family server, where the Mods
+  // tab never lists them (so they couldn't even be removed from the panel).
+  const targetKind = modsService.contentKindOf(server);
   const info = await inspect(zipPath);
   const report = { installed: [], failed: [], blocked: [], skipped: [], overrides: null };
 
@@ -366,10 +368,11 @@ async function importForServer(
     const entries = await resolveManifestEntries(info.manifest.files);
     const wanted = selections ? new Set(selections.map(Number)) : null;
     const queue = [];
+    // Missing/blocked status outranks deselection: the UI force-unchecks those
+    // rows, so 'deselected' would hide a pack's real gaps from the report and
+    // the event log.
     for (const e of entries) {
-      if (wanted && !wanted.has(e.fileId)) {
-        report.skipped.push({ name: e.name, reason: 'deselected' });
-      } else if (!e.resolved) {
+      if (!e.resolved) {
         report.failed.push({ name: e.name, reason: 'file no longer exists on CurseForge' });
       } else if (!e.downloadable) {
         report.blocked.push({
@@ -379,6 +382,8 @@ async function importForServer(
           projectId: e.projectId,
           fileId: e.fileId,
         });
+      } else if (wanted && !wanted.has(e.fileId)) {
+        report.skipped.push({ name: e.name, reason: 'deselected' });
       } else {
         queue.push(e);
       }
@@ -391,9 +396,9 @@ async function importForServer(
           serverId,
           {
             downloadUrl: e.downloadUrl,
-            kind: 'mod',
+            kind: targetKind,
             meta: {
-              category: 'mod',
+              category: targetKind,
               platform: 'curseforge',
               projectId: String(e.projectId),
               fileId: String(e.fileId),
@@ -423,10 +428,26 @@ async function importForServer(
       [...buffers.entries()].map(([name, buffer]) => ({ name, buffer }))
     );
     const identityByEntry = new Map(identified.map((j) => [j.filename, j.identity]));
+    // Documented default (no selections): install every jar whose verdict isn't
+    // wrong-* — unidentified jars stay in, but a jar known to be the wrong
+    // loader/kind/MC for this server never installs implicitly.
+    const judge = (entry) =>
+      modIdentify.verdictFor(identityByEntry.get(entry) || null, {
+        kind: targetKind,
+        loader: modsService.loaderOf(server),
+        mc: server.mc_version,
+      });
     const wanted = selections ? new Set(selections) : null;
-    const names = [...buffers.keys()].filter((n) => !wanted || wanted.has(n));
-    for (const n of [...buffers.keys()].filter((x) => wanted && !wanted.has(x))) {
-      report.skipped.push({ name: path.basename(n), reason: 'deselected' });
+    const names = [];
+    for (const entry of buffers.keys()) {
+      const verdict = wanted ? null : judge(entry);
+      if (wanted && !wanted.has(entry)) {
+        report.skipped.push({ name: path.basename(entry), reason: 'deselected' });
+      } else if (verdict && verdict.status.startsWith('wrong-')) {
+        report.skipped.push({ name: path.basename(entry), reason: verdict.status });
+      } else {
+        names.push(entry);
+      }
     }
     const tmpDir = dataPath('tmp');
     await fsp.mkdir(tmpDir, { recursive: true });
