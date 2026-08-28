@@ -29,6 +29,12 @@ test('unknown or modded recipes are not invented and non-crafting questions pass
   assert.equal(recipes.recipeReply('tell me a story about a fish', '1.20.1'), null);
 });
 
+test('common spoken aliases and verified processing hints remain deterministic', () => {
+  const expected = 'Smelt Sand or Red Sand in a furnace to make Glass.';
+  assert.match(recipes.recipeReply('what is the recipe for glass?', '1.20.1'), new RegExp(`^${expected}`));
+  assert.match(recipes.recipeReply('how do I make a glass block?', '1.20.1'), new RegExp(`^${expected}`));
+});
+
 test('generic item families ask the player to choose a specific craftable item', () => {
   assert.equal(
     recipes.recipeReply('how do I craft a pickaxe?', '1.20.1'),

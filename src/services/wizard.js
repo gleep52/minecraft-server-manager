@@ -444,6 +444,7 @@ async function handleChat(serverId, player, message) {
         color: 'light_purple',
         italic: true,
         preserveNewlines: true,
+        separateLines: true,
       });
       return true;
     }

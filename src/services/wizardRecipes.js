@@ -9,7 +9,11 @@ const NON_RECIPE_MAKE_RE = /\b(?:rain|weather|day|daytime|night|midnight|thunder
 const ALIASES = Object.freeze({
   'fishing pole': 'fishing rod',
   fishingpole: 'fishing rod',
+  'glass block': 'glass',
   workbench: 'crafting table',
+});
+const PROCESSING_HINTS = Object.freeze({
+  glass: 'Smelt Sand or Red Sand in a furnace to make Glass.',
 });
 
 function normalizeWords(value) {
@@ -173,7 +177,9 @@ function recipeReply(prompt, version) {
   }
   if (!recipe) {
     const shownVersion = data.version?.minecraftVersion || version || 'this Minecraft version';
-    return `${item.displayName || item.name} has no 2×2 or 3×3 crafting-grid recipe in ${shownVersion}. It may use another workstation, such as a smithing table.`;
+    const hint = PROCESSING_HINTS[item.name];
+    if (hint) return `${hint} It has no 2×2 or 3×3 crafting-grid recipe in ${shownVersion}.`;
+    return `${item.displayName || item.name} has no 2×2 or 3×3 crafting-grid recipe in ${shownVersion}. It may use a furnace or another workstation, such as a smithing table.`;
   }
   return renderRecipe(item, recipe, data);
 }

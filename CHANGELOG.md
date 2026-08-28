@@ -5,6 +5,16 @@ All notable changes to this project are documented here. The format is based on
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Each push is cut as a new release with
 its own dated entry.
 
+## [0.12.2] - 2026-08-28
+
+### Fixed
+
+- Recipe diagrams are sent as individual Minecraft chat lines, so compact recipes such as boots
+  cannot have their grid flattened by the RCON/tellraw rendering path.
+- “Glass block” is recognized as ordinary glass, and glass questions now give the verified furnace
+  recipe instead of a generic workstation message. Recipe wording remains deterministic rather
+  than allowing the LLM to invent crafting instructions.
+
 ## [0.12.1] - 2026-08-28
 
 ### Fixed
