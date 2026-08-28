@@ -69,14 +69,12 @@
       <div class="mt-4 grid gap-4 lg:grid-cols-3">
         <div>
           <label class="label" for="ig-wz-testers">Minecraft testers</label>
-          <textarea class="input min-h-28 font-mono text-xs" id="ig-wz-testers" placeholder="Gleep52&#10;PlayerA">{{#each integrations.wizard.powerTesters}}{{this}}{{#unless @last}}
-{{/unless}}{{/each}}</textarea>
+          <textarea class="input min-h-28 font-mono text-xs" id="ig-wz-testers" placeholder="Gleep52&#10;PlayerA">{{{joinLines integrations.wizard.powerTesters}}}</textarea>
           <p class="help">One exact player name per line. Maximum 50.</p>
         </div>
         <div>
           <label class="label" for="ig-wz-gifts">Allowed gifts</label>
-          <textarea class="input min-h-28 font-mono text-xs" id="ig-wz-gifts">{{#each integrations.wizard.giftItems}}{{this}}{{#unless @last}}
-{{/unless}}{{/each}}</textarea>
+          <textarea class="input min-h-28 font-mono text-xs" id="ig-wz-gifts">{{{joinLines integrations.wizard.giftItems}}}</textarea>
           <p class="help">One namespaced item ID per line. The model cannot select anything else.</p>
         </div>
         <div class="space-y-3">
@@ -98,8 +96,8 @@
     <div class="mt-4 flex flex-wrap items-center gap-2">
       <button class="btn btn-primary" id="ig-wz-save">Save wizard</button>
       <button class="btn" id="ig-wz-test">Test connection</button>
-      <button class="btn" id="ig-wz-transcripts">View this server's transcripts</button>
-      <button class="btn" id="ig-wz-power-audit">View power audit</button>
+      <button class="btn" id="ig-wz-transcripts">Refresh this server's transcripts</button>
+      <button class="btn" id="ig-wz-power-audit">Refresh power audit</button>
       <a class="btn btn-ghost" href="/wizard-transcripts">All transcript archives</a>
       <span class="hidden text-xs text-warn" data-ig-dirty="wz">Unsaved changes</span>
     </div>

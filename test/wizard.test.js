@@ -45,6 +45,15 @@ test('wizard configuration and transcripts are admin-only', async () => {
   const adminPage = await app.req('GET', `/servers/${serverId}/integrations`, { cookie: adminCookie });
   const operatorPage = await app.req('GET', `/servers/${serverId}/integrations`, { cookie: operatorCookie });
   assert.match(adminPage.text, /Wizard chatbot/);
+  assert.match(adminPage.text, /Refresh this server's transcripts/);
+  assert.match(adminPage.text, /Refresh power audit/);
+  const giftTextarea = /id="ig-wz-gifts">([\s\S]*?)<\/textarea>/.exec(adminPage.text);
+  assert.ok(giftTextarea);
+  assert.deepEqual(giftTextarea[1].replaceAll('&#10;', '\n').split('\n'), [
+    'minecraft:bread',
+    'minecraft:torch',
+    'minecraft:arrow',
+  ]);
   assert.doesNotMatch(operatorPage.text, /Wizard chatbot/);
 });
 
@@ -136,6 +145,31 @@ test('power tools can only affect the caller and reject injected arguments', () 
     'Gleep52'
   );
   assert.deepEqual(gift.args, { item: 'minecraft:bread', count: 2 });
+  const duplicate = wizardPowers.parseToolCall(
+    {
+      tool_calls: [
+        { function: { name: 'give_self', arguments: '{"item":"minecraft:bread","count":2}' } },
+        { function: { name: 'give_self', arguments: { item: 'minecraft:bread', count: 2 } } },
+      ],
+    },
+    cfg,
+    'Gleep52'
+  );
+  assert.deepEqual(duplicate.args, { item: 'minecraft:bread', count: 2 });
+  assert.throws(
+    () =>
+      wizardPowers.parseToolCall(
+        {
+          tool_calls: [
+            { function: { name: 'heal_self', arguments: '{}' } },
+            { function: { name: 'give_self', arguments: '{"item":"minecraft:bread","count":1}' } },
+          ],
+        },
+        cfg,
+        'Gleep52'
+      ),
+    /more than one different power/
+  );
   assert.throws(
     () =>
       wizardPowers.parseToolCall(
@@ -195,6 +229,8 @@ test('dry-run powers write a complete audit event without executing RCON', async
   );
   const result = await wizardPowers.execute(serverId, 'Gleep52', { name: 'heal_self', args: {} }, cfg);
   assert.equal(result.dryRun, true);
+  const immediateSecondDryRun = await wizardPowers.execute(serverId, 'Gleep52', { name: 'heal_self', args: {} }, cfg);
+  assert.equal(immediateSecondDryRun.dryRun, true);
   const audit = wizardPowers.listAudit(serverId, 10);
   assert.match(audit[0].summary, /Dry run: Gleep52 would restore full health/);
   assert.equal(audit[0].details.power, 'heal_self');

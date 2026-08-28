@@ -5,6 +5,18 @@ All notable changes to this project are documented here. The format is based on
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Each push is cut as a new release with
 its own dated entry.
 
+## [0.11.1] - 2026-08-28
+
+### Fixed
+
+- Dry-run power checks no longer consume the live per-player cooldown, so switching dry-run off
+  does not temporarily block the first real action.
+- Identical duplicate tool calls from smaller local models are safely collapsed into one action;
+  genuinely different simultaneous powers remain rejected. Expected validation and cooldown
+  messages now explain the problem in Minecraft chat instead of showing the generic LLM failure.
+- The per-server transcript and power-audit buttons are labeled **Refresh** to describe their
+  live fetch behavior, and tester/gift text areas no longer inherit template indentation.
+
 ## [0.11.0] - 2026-08-28
 
 ### Added

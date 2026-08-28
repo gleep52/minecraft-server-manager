@@ -104,7 +104,12 @@ function toolsFor(cfg, player) {
 function parseToolCall(message, cfg, player) {
   const calls = message && Array.isArray(message.tool_calls) ? message.tool_calls : [];
   if (!calls.length) return null;
-  if (calls.length !== 1) throw httpError(400, 'The Wizard requested more than one power at once');
+  if (calls.length > 1) {
+    const parsed = calls.map((call) => parseToolCall({ tool_calls: [call] }, cfg, player));
+    const signatures = new Set(parsed.map((request) => JSON.stringify([request.name, request.args])));
+    if (signatures.size === 1) return parsed[0];
+    throw httpError(400, 'The Wizard requested more than one different power at once');
+  }
   const call = calls[0];
   const name = String(call?.function?.name || '');
   const allowed = new Set(toolsFor(cfg, player).map((tool) => tool.function.name));
@@ -239,7 +244,6 @@ async function execute(serverId, player, request, cfg) {
       summary: `Dry run: ${player} would ${action}`,
       details,
     });
-    cooldowns.set(key, Date.now());
     return { dryRun: true, message: `Dry run only: I would ${action}.` };
   }
 

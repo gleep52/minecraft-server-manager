@@ -242,7 +242,7 @@ async function completionMessage(
   const history = persist && cfg.retentionDays > 0 ? recentConversation(serverId, player) : [];
   const tools = allowPowers ? wizardPowers.toolsFor(cfg, player) : [];
   const powerGuard = tools.length
-    ? 'You have only the provided tools. A tool always affects the requesting player when named self. Never claim an action happened unless you call a tool.'
+    ? 'You have only the provided tools. A tool always affects the requesting player when named self. Call at most one tool for a request. Never claim an action happened unless you call a tool.'
     : 'No gameplay tools are available for this player. Continue conversationally and never claim that you changed the game.';
   const request = {
     model: cfg.model,
@@ -392,8 +392,10 @@ async function handleChat(serverId, player, message) {
   inflight.add(key);
   cooldowns.set(key, Date.now());
   let exchangeRecorded = false;
+  let powerAttempted = false;
   try {
     const { message, cfg: powerCfg } = await completionMessage(serverId, player, prompt, { allowPowers: true });
+    powerAttempted = Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
     let powerRequest;
     try {
       powerRequest = wizardPowers.parseToolCall(message, powerCfg, player);
@@ -420,11 +422,18 @@ async function handleChat(serverId, player, message) {
     if (!exchangeRecorded) insertTranscript(serverId, player, 'user', prompt);
     insertTranscript(serverId, player, 'error', String(err.message || err));
     console.warn(`[wizard] ${serverId}/${player}: ${err.message}`);
+    const safePowerMessage = powerAttempted
+      ? err.status === 429
+        ? err.message
+        : err.status >= 400 && err.status < 500
+          ? 'I could not safely interpret that power request. Please ask for one power at a time.'
+          : null
+      : null;
     await chat
       .sendChat(serverId, {
         actor: cfg.invocationName,
         target: player,
-        text: `[${label}] The veil is cloudy just now. Ask me again shortly.`,
+        text: `[${label}] ${safePowerMessage || 'The veil is cloudy just now. Ask me again shortly.'}`,
         color: 'dark_purple',
         italic: true,
       })
