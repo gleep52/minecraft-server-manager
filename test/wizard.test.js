@@ -261,6 +261,17 @@ test('model discovery supports OpenAI-compatible model lists and free-text trigg
   assert.equal(wizard.assistantLabel('bubba'), 'Bubba');
 });
 
+test('conversational replies unwrap story envelopes and never end mid-word', () => {
+  assert.equal(
+    wizard.cleanReply('{"name":"tell_a_story","parameters":{"story":"Finley found a pearl and swam home."}}'),
+    'Finley found a pearl and swam home.'
+  );
+  const long = wizard.cleanReply('Finley crossed the bright reef. '.repeat(30));
+  assert.ok(long.length <= 350);
+  assert.match(long, /\. …$/);
+  assert.throws(() => wizard.cleanReply('{"name":"tell_a_story","parameters":{"length":300}}'), /tool-shaped response/);
+});
+
 test('invocation names reject ambiguous or unsafe values', async () => {
   for (const invocationName of ['two words', '@wizard', '9lives', 'wizard!']) {
     const res = await app.req('POST', `/api/servers/${serverId}/wizard`, {

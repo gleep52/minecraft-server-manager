@@ -16,7 +16,7 @@ const DEFAULT_PROMPT =
   'You may converse, tell stories, tease gently, and offer Minecraft advice. ' +
   'Never claim that you performed a gameplay action unless an available tool completed successfully.';
 const INVOCATION_NAME_RE = /^[A-Za-z][A-Za-z0-9_-]{0,31}$/;
-const MAX_REPLY = 400;
+const MAX_REPLY = 350;
 const HISTORY_MESSAGES = 20;
 const REQUEST_TIMEOUT_MS = 30_000;
 const inflight = new Set();
@@ -250,7 +250,10 @@ async function completionMessage(
     max_tokens: 180,
     stream: false,
     messages: [
-      { role: 'system', content: `${cfg.systemPrompt}\n\nSecurity rule: ${powerGuard}` },
+      {
+        role: 'system',
+        content: `${cfg.systemPrompt}\n\nSecurity rule: ${powerGuard} Return ordinary conversation as plain text, never JSON or a pretend function call.`,
+      },
       ...history.map((m) => ({ role: m.role, content: m.role === 'user' ? `${m.player}: ${m.content}` : m.content })),
       { role: 'user', content: `${player}: ${prompt}` },
     ],
@@ -274,7 +277,7 @@ async function completionMessage(
     if (!tools.length) throw err;
     delete request.tools;
     delete request.tool_choice;
-    request.messages[0].content = `${cfg.systemPrompt}\n\nSecurity rule: No gameplay tools are available for this player. Continue conversationally and never claim that you changed the game.`;
+    request.messages[0].content = `${cfg.systemPrompt}\n\nSecurity rule: No gameplay tools are available for this player. Continue conversationally, never claim that you changed the game, and return plain text rather than JSON or a pretend function call.`;
     body = await fetchJson(url, { ...options, body: JSON.stringify(request) });
   }
   const message = body?.choices?.[0]?.message;
@@ -284,10 +287,43 @@ async function completionMessage(
 
 function cleanReply(raw) {
   if (typeof raw !== 'string' || !raw.trim()) throw httpError(502, 'The LLM returned an empty response');
-  return raw
-    .replace(/[\r\n\x00-\x1f\x7f]+/g, ' ')
-    .trim()
-    .slice(0, MAX_REPLY);
+  let text = raw.trim();
+  if (text.startsWith('{') && text.endsWith('}')) {
+    try {
+      const envelope = JSON.parse(text);
+      const inner = envelope && typeof envelope === 'object' ? envelope.parameters : null;
+      const candidate = [
+        envelope?.content,
+        envelope?.text,
+        envelope?.message,
+        envelope?.response,
+        envelope?.story,
+        inner?.content,
+        inner?.text,
+        inner?.message,
+        inner?.response,
+        inner?.story,
+      ].find((value) => typeof value === 'string' && value.trim());
+      if (candidate) text = candidate;
+      else if (envelope?.name || envelope?.function || envelope?.tool_calls || envelope?.parameters) {
+        throw httpError(502, 'The LLM returned a tool-shaped response instead of conversational text');
+      }
+    } catch (err) {
+      if (err.status) throw err;
+      // Malformed prose that merely begins/ends with braces is still treated as
+      // ordinary text; the normal chat sanitizer and boundary truncation apply.
+    }
+  }
+  text = text.replace(/[\r\n\x00-\x1f\x7f]+/g, ' ').trim();
+  if (text.length <= MAX_REPLY) return text;
+
+  const prefix = text.slice(0, MAX_REPLY - 2);
+  const minimumUsefulCut = Math.floor(MAX_REPLY * 0.55);
+  const sentenceEnds = [...prefix.matchAll(/[.!?](?=\s|$)/g)];
+  const sentence = sentenceEnds.findLast((match) => match.index >= minimumUsefulCut);
+  let cut = sentence ? sentence.index + 1 : prefix.lastIndexOf(' ');
+  if (cut < minimumUsefulCut) cut = prefix.length;
+  return `${prefix.slice(0, cut).trimEnd()} …`;
 }
 
 async function complete(serverId, player, prompt, options = {}) {
@@ -462,4 +498,5 @@ module.exports = {
   pruneTranscripts,
   normalizeBaseUrl,
   completionMessage,
+  cleanReply,
 };

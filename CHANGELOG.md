@@ -5,6 +5,16 @@ All notable changes to this project are documented here. The format is based on
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Each push is cut as a new release with
 its own dated entry.
 
+## [0.11.2] - 2026-08-28
+
+### Fixed
+
+- Conversational Wizard replies no longer expose common model-generated JSON wrappers such as a
+  fabricated `tell_a_story` function call. Story/text fields are safely unwrapped, unsupported
+  tool-shaped prose is withheld, and the system instruction now explicitly requires plain text.
+- Long single-message replies now end at a sentence or word boundary with an ellipsis instead of
+  being sliced mid-word. The Wizard still sends one Minecraft message rather than flooding chat.
+
 ## [0.11.1] - 2026-08-28
 
 ### Fixed
