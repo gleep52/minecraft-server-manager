@@ -114,6 +114,9 @@ async function listContent(serverId) {
       iconUrl:
         lib && lib.icon_rel_path ? `/${lib.icon_rel_path}` : (lib && lib.icon_url) || (row && row.icon_url) || null,
       updateAvailable: updateFor(row),
+      // Provenance, when known — lets search UIs badge already-installed hits.
+      platform: (lib && lib.platform) || null,
+      projectId: (lib && lib.project_id) || null,
     });
   }
   // Overlay rows whose files vanished (user deleted manually) — surface them.
@@ -191,7 +194,11 @@ async function installFromUrl(serverId, input, { actor = 'system', kind, onProgr
   if (!server) throw httpError(404, 'Server not found');
   const targetKind = kind || (PLUGIN_TYPES.has(server.type) ? 'plugin' : 'mod');
   const mcVersion = server.mc_version === 'LATEST' || server.mc_version === 'SNAPSHOT' ? undefined : server.mc_version;
-  const loader = loaderOf(server);
+  // Loader is only a meaningful version filter for mods: Modrinth tags plugin
+  // builds paper/spigot/bukkit (strict facet — would hide spigot-only plugins)
+  // and datapack builds "datapack", so filtering those by the server's loader
+  // over-filters to zero results.
+  const loader = targetKind === 'mod' ? loaderOf(server) : undefined;
 
   const source = classifyModSource(input);
   if (source.kind === 'invalid') {
@@ -248,9 +255,22 @@ async function installFromUrl(serverId, input, { actor = 'system', kind, onProgr
   }
   // source.kind === 'direct' → plain download of the URL as-is.
 
+  return installResolved(serverId, { downloadUrl, meta, kind: targetKind }, { actor, onProgress });
+}
+
+/**
+ * Install an already-resolved download (URL + metadata) as an overlay.
+ * The shared tail of every install path: library download → quota check →
+ * link into the server dir → server_content row → event. Used directly by
+ * bulk installers (modpack zip import) that resolved files via bulk API calls
+ * and must not re-resolve one mod at a time.
+ */
+async function installResolved(serverId, { downloadUrl, meta, kind = 'mod' }, { actor = 'system', onProgress } = {}) {
+  const server = serversService.getServer(serverId);
+  if (!server) throw httpError(404, 'Server not found');
   const lib = await library.downloadToLibrary(downloadUrl, meta, { onProgress, actor });
   indexer.assertUnderQuota(server, lib.size_bytes);
-  const { filename } = await library.installToServer(lib.id, serverId, contentDir(server, targetKind));
+  const { filename } = await library.installToServer(lib.id, serverId, contentDir(server, kind));
 
   const id = `sc_${nanoid(8)}`;
   db.run(
@@ -260,7 +280,7 @@ async function installFromUrl(serverId, input, { actor = 'system', kind, onProgr
     id,
     serverId,
     lib.id,
-    targetKind,
+    kind,
     lib.name,
     filename,
     lib.version,
@@ -270,7 +290,7 @@ async function installFromUrl(serverId, input, { actor = 'system', kind, onProgr
     serverId,
     actor,
     type: 'mod-installed',
-    summary: `Custom ${targetKind} installed: ${lib.name}${lib.version ? ` ${lib.version}` : ''} (overlay)`,
+    summary: `Custom ${kind} installed: ${lib.name}${lib.version ? ` ${lib.version}` : ''} (overlay)`,
     details: { libraryId: lib.id, filename },
   });
   indexer.scan().catch(() => {});
@@ -505,16 +525,57 @@ function excludePackMod(serverId, token, { actor = 'system' } = {}) {
   return { excluded: token };
 }
 
-/** Install a manually-uploaded jar as an overlay (optionally excluding the pack's copy). */
+/**
+ * Install a manually-uploaded jar as an overlay (optionally excluding the
+ * pack's copy). The jar is identified first (Modrinth hash → CF fingerprint →
+ * embedded metadata) so uploads keep real provenance — name, version, icon,
+ * and the platform/project ids that make them update-checkable later.
+ */
 async function importUploadedMod(serverId, tmpPath, origName, { excludeToken, actor = 'system' } = {}) {
+  const filename = origName || 'mod.jar';
+  let identity = null;
+  try {
+    const buffer = await fsp.readFile(tmpPath);
+    const [identified] = await require('./modIdentify').identifyJars([{ name: filename, buffer }]);
+    identity = identified.identity;
+  } catch {
+    /* identification is best-effort — an unreadable jar still imports as-is */
+  }
+  return installLocalContent(serverId, tmpPath, filename, { identity, excludeToken, actor });
+}
+
+/**
+ * Shared tail of every local-file install: library import (with whatever
+ * identity is known) → quota → link into the server dir → overlay row.
+ * Bulk importers (mod-zip digester) identify in one batch and call this per
+ * jar; the single-upload path identifies one jar then lands here.
+ */
+async function installLocalContent(
+  serverId,
+  tmpPath,
+  filename,
+  { identity = null, excludeToken, actor = 'system' } = {}
+) {
   const server = serversService.getServer(serverId);
   if (!server) throw httpError(404, 'Server not found');
-  const filename = origName || 'mod.jar';
   if (!/\.(jar|zip)$/i.test(filename)) throw httpError(400, 'Only .jar or .zip files can be uploaded');
   const targetKind = PLUGIN_TYPES.has(server.type) ? 'plugin' : 'mod';
+
+  const fromRegistry = identity && (identity.platform === 'modrinth' || identity.platform === 'curseforge');
   const lib = await library.importFile(
     tmpPath,
-    { name: prettifyJarName(filename), filename, category: targetKind },
+    {
+      name: (identity && identity.name) || prettifyJarName(filename),
+      filename,
+      category: targetKind,
+      version: (identity && identity.version) || null,
+      platform: fromRegistry ? identity.platform : 'upload',
+      projectId: fromRegistry ? identity.projectId : null,
+      fileId: fromRegistry ? identity.versionId : null,
+      iconUrl: (identity && identity.iconUrl) || null,
+      mcVersions: (identity && identity.mcVersions) || [],
+      loaders: (identity && identity.loaders) || [],
+    },
     { actor }
   );
   indexer.assertUnderQuota(server, lib.size_bytes);
@@ -541,12 +602,13 @@ async function importUploadedMod(serverId, tmpPath, origName, { excludeToken, ac
     details: { filename: installed },
   });
   indexer.scan().catch(() => {});
-  return { filename: installed, excluded: excludeToken || null };
+  return { filename: installed, name: lib.name, version: lib.version, excluded: excludeToken || null };
 }
 
 module.exports = {
   listContent,
   installFromUrl,
+  installResolved,
   classifyModSource,
   setEnabled,
   removeContent,
@@ -560,4 +622,5 @@ module.exports = {
   excludePackMod,
   clearPendingLine,
   importUploadedMod,
+  installLocalContent,
 };
