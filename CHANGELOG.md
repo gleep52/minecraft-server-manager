@@ -5,6 +5,14 @@ All notable changes to this project are documented here. The format is based on
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Each push is cut as a new release with
 its own dated entry.
 
+## [0.10.1] - 2026-08-28
+
+### Added
+
+- The per-server chatbot invocation name is now configurable by admins. A name such as `bubba` is
+  invoked with `@bubba` and appears as `Bubba` in Minecraft chat and retained transcripts instead
+  of the generic `Wizard` / `assistant` labels. Existing configurations continue to use `wizard`.
+
 ## [0.10.0] - 2026-08-28
 
 ### Added

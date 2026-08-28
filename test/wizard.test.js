@@ -49,6 +49,7 @@ test('wizard configuration and transcripts are admin-only', async () => {
 test('per-server config encrypts the API key and defaults retention to seven days', async () => {
   const initial = await app.req('GET', `/api/servers/${serverId}/wizard`, { cookie: adminCookie });
   assert.equal(initial.json.wizard.retentionDays, 7);
+  assert.equal(initial.json.wizard.invocationName, 'wizard');
 
   const saved = await app.req('POST', `/api/servers/${serverId}/wizard`, {
     cookie: adminCookie,
@@ -56,6 +57,7 @@ test('per-server config encrypts the API key and defaults retention to seven day
       enabled: true,
       baseUrl: 'http://192.168.1.50:11434',
       model: 'llama3.2:latest',
+      invocationName: 'bubba',
       apiKey: 'not-plaintext-in-db',
       systemPrompt: 'You are the test wizard.',
       retentionDays: 14,
@@ -66,6 +68,7 @@ test('per-server config encrypts the API key and defaults retention to seven day
   assert.equal(Object.hasOwn(saved.json.wizard, 'apiKey'), false);
   const stored = db.get('SELECT * FROM wizard_configs WHERE server_id = ?', serverId);
   assert.notEqual(stored.api_key_cipher, 'not-plaintext-in-db');
+  assert.equal(stored.invocation_name, 'bubba');
   assert.equal(wizard.getConfig(serverId, { includeSecret: true }).apiKey, 'not-plaintext-in-db');
 });
 
@@ -88,6 +91,26 @@ test('model discovery supports OpenAI-compatible model lists and free-text trigg
   }
   assert.equal(wizard.TRIGGER_RE.test('ordinary player chat'), false);
   assert.equal(wizard.TRIGGER_RE.test('@wizard what mysteries await?'), true);
+  assert.equal(wizard.invocationPattern('bubba').test('@wizard what mysteries await?'), false);
+  assert.equal(wizard.invocationPattern('bubba').test('@BUBBA what mysteries await?'), true);
+  assert.equal(wizard.assistantLabel('bubba'), 'Bubba');
+});
+
+test('invocation names reject ambiguous or unsafe values', async () => {
+  for (const invocationName of ['two words', '@wizard', '9lives', 'wizard!']) {
+    const res = await app.req('POST', `/api/servers/${serverId}/wizard`, {
+      cookie: adminCookie,
+      body: {
+        enabled: false,
+        baseUrl: 'http://127.0.0.1:11434',
+        model: 'qwen:test',
+        invocationName,
+        systemPrompt: 'Test',
+        retentionDays: 7,
+      },
+    });
+    assert.equal(res.status, 400, invocationName);
+  }
 });
 
 test('retention pruning preserves recent rows and removes expired rows', () => {
@@ -116,6 +139,7 @@ test('retention pruning preserves recent rows and removes expired rows', () => {
     rows.some((r) => r.content === 'recent'),
     true
   );
+  assert.equal(rows.find((r) => r.content === 'recent').speaker, 'Bubba');
 });
 
 test('transcripts remain available after the server is soft-deleted', () => {

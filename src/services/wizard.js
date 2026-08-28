@@ -14,12 +14,35 @@ const DEFAULT_PROMPT =
   'Address players by name when natural. Keep every response under 350 characters. ' +
   'You may converse, tell stories, tease gently, and offer Minecraft advice. ' +
   'You cannot perform gameplay actions yet, so never claim that you gave an item, teleported someone, or changed the world.';
-const TRIGGER_RE = /^@wizard(?:\s+([\s\S]*))?$/i;
+const INVOCATION_NAME_RE = /^[A-Za-z][A-Za-z0-9_-]{0,31}$/;
 const MAX_REPLY = 400;
 const HISTORY_MESSAGES = 20;
 const REQUEST_TIMEOUT_MS = 30_000;
 const inflight = new Set();
 const cooldowns = new Map();
+
+function normalizeInvocationName(raw) {
+  const name = String(raw || 'wizard').trim();
+  if (!INVOCATION_NAME_RE.test(name)) {
+    throw httpError(
+      400,
+      'The invocation name must start with a letter and use only letters, numbers, _ or - (32 characters max)'
+    );
+  }
+  return name;
+}
+
+function invocationPattern(name = 'wizard') {
+  const escaped = normalizeInvocationName(name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`^@${escaped}(?:\\s+([\\s\\S]*))?$`, 'i');
+}
+
+function assistantLabel(name = 'wizard') {
+  const normalized = normalizeInvocationName(name);
+  return normalized[0].toUpperCase() + normalized.slice(1);
+}
+
+const TRIGGER_RE = invocationPattern('wizard');
 
 function row(serverId) {
   return db.get('SELECT * FROM wizard_configs WHERE server_id = ?', serverId);
@@ -32,6 +55,7 @@ function getConfig(serverId, { includeSecret = false } = {}) {
     enabled: Boolean(r && r.enabled),
     baseUrl: (r && r.base_url) || 'http://127.0.0.1:11434',
     model: (r && r.model) || '',
+    invocationName: (r && r.invocation_name) || 'wizard',
     systemPrompt: (r && r.system_prompt) || DEFAULT_PROMPT,
     retentionDays: r ? r.retention_days : 7,
     hasApiKey: Boolean(key),
@@ -73,6 +97,7 @@ function saveConfig(serverId, input, _options = {}) {
   const previous = row(serverId);
   const baseUrl = normalizeBaseUrl(input.baseUrl);
   const model = String(input.model || '').trim();
+  const invocationName = normalizeInvocationName(input.invocationName ?? previous?.invocation_name ?? 'wizard');
   if (input.enabled && !model) throw httpError(400, 'Choose or enter a model before enabling the wizard');
   const retentionDays = Math.max(0, Math.min(3650, Math.trunc(Number(input.retentionDays))));
   const prompt = String(input.systemPrompt || '').trim() || DEFAULT_PROMPT;
@@ -81,19 +106,21 @@ function saveConfig(serverId, input, _options = {}) {
   else if (typeof input.apiKey === 'string' && input.apiKey.trim()) cipher = secrets.encrypt(input.apiKey.trim());
   db.run(
     `INSERT INTO wizard_configs
-       (server_id, enabled, base_url, model, api_key_cipher, system_prompt, retention_days, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+       (server_id, enabled, base_url, model, api_key_cipher, system_prompt, retention_days, invocation_name, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
      ON CONFLICT(server_id) DO UPDATE SET
        enabled = excluded.enabled, base_url = excluded.base_url, model = excluded.model,
        api_key_cipher = excluded.api_key_cipher, system_prompt = excluded.system_prompt,
-       retention_days = excluded.retention_days, updated_at = datetime('now')`,
+       retention_days = excluded.retention_days, invocation_name = excluded.invocation_name,
+       updated_at = datetime('now')`,
     serverId,
     input.enabled ? 1 : 0,
     baseUrl,
     model,
     cipher,
     prompt,
-    retentionDays
+    retentionDays,
+    invocationName
   );
   pruneTranscripts(serverId);
   return getConfig(serverId);
@@ -225,9 +252,27 @@ function recentConversation(serverId, player) {
 
 function listTranscripts({ serverId = null, limit = 250 } = {}) {
   const n = Math.max(1, Math.min(2000, Math.trunc(Number(limit)) || 250));
-  return serverId
-    ? db.all('SELECT * FROM wizard_transcripts WHERE server_id = ? ORDER BY id DESC LIMIT ?', serverId, n)
-    : db.all('SELECT * FROM wizard_transcripts ORDER BY id DESC LIMIT ?', n);
+  const rows = serverId
+    ? db.all(
+        `SELECT t.*, COALESCE(c.invocation_name, 'wizard') AS invocation_name
+         FROM wizard_transcripts t LEFT JOIN wizard_configs c ON c.server_id = t.server_id
+         WHERE t.server_id = ? ORDER BY t.id DESC LIMIT ?`,
+        serverId,
+        n
+      )
+    : db.all(
+        `SELECT t.*, COALESCE(c.invocation_name, 'wizard') AS invocation_name
+         FROM wizard_transcripts t LEFT JOIN wizard_configs c ON c.server_id = t.server_id
+         ORDER BY t.id DESC LIMIT ?`,
+        n
+      );
+  return rows.map((r) => {
+    const bot = assistantLabel(r.invocation_name);
+    return {
+      ...r,
+      speaker: r.role === 'user' ? r.player : r.role === 'assistant' ? bot : `${bot} error`,
+    };
+  });
 }
 
 function clearTranscripts(serverId = null) {
@@ -257,9 +302,10 @@ function pruneTranscripts(serverId = null) {
 async function handleChat(serverId, player, message) {
   const cfg = getConfig(serverId);
   if (!cfg.enabled || !PLAYER_NAME_RE.test(String(player))) return false;
-  const match = TRIGGER_RE.exec(String(message || '').trim());
+  const match = invocationPattern(cfg.invocationName).exec(String(message || '').trim());
   if (!match) return false;
-  const prompt = (match[1] || 'Greetings, wizard.').trim().slice(0, 1000);
+  const label = assistantLabel(cfg.invocationName);
+  const prompt = (match[1] || `Greetings, ${label}.`).trim().slice(0, 1000);
   const key = `${serverId}:${String(player).toLowerCase()}`;
   if (inflight.has(key)) return true;
   const last = cooldowns.get(key) || 0;
@@ -273,9 +319,9 @@ async function handleChat(serverId, player, message) {
     insertTranscript(serverId, player, 'assistant', reply);
     exchangeRecorded = true;
     await chat.sendChat(serverId, {
-      actor: 'wizard',
+      actor: cfg.invocationName,
       target: '@a',
-      text: `[Wizard] ${reply}`,
+      text: `[${label}] ${reply}`,
       color: 'light_purple',
       italic: true,
     });
@@ -288,9 +334,9 @@ async function handleChat(serverId, player, message) {
     console.warn(`[wizard] ${serverId}/${player}: ${err.message}`);
     await chat
       .sendChat(serverId, {
-        actor: 'wizard',
+        actor: cfg.invocationName,
         target: player,
-        text: '[Wizard] The veil is cloudy just now. Ask me again shortly.',
+        text: `[${label}] The veil is cloudy just now. Ask me again shortly.`,
         color: 'dark_purple',
         italic: true,
       })
@@ -304,6 +350,10 @@ async function handleChat(serverId, player, message) {
 module.exports = {
   DEFAULT_PROMPT,
   TRIGGER_RE,
+  INVOCATION_NAME_RE,
+  normalizeInvocationName,
+  invocationPattern,
+  assistantLabel,
   getConfig,
   saveConfig,
   listModels,

@@ -41,6 +41,11 @@ router.post(
         enabled: z.boolean(),
         baseUrl: z.string().trim().min(1).max(500),
         model: z.string().trim().max(200),
+        invocationName: z
+          .string()
+          .trim()
+          .regex(/^[A-Za-z][A-Za-z0-9_-]{0,31}$/)
+          .optional(),
         apiKey: z.string().max(1000).optional(),
         clearApiKey: z.boolean().optional(),
         systemPrompt: z.string().max(12000),

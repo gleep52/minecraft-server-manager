@@ -25,6 +25,7 @@ function init() {
   const cleanSp = bindDirty('sp', [document.getElementById('ig-sp-enabled'), document.getElementById('ig-sp-slug')]);
   const cleanWz = bindDirty('wz', [
     document.getElementById('ig-wz-enabled'),
+    document.getElementById('ig-wz-name'),
     document.getElementById('ig-wz-url'),
     document.getElementById('ig-wz-model'),
     document.getElementById('ig-wz-key'),
@@ -76,6 +77,7 @@ function init() {
     const conn = wizardConnection();
     const body = {
       enabled: document.getElementById('ig-wz-enabled').checked,
+      invocationName: document.getElementById('ig-wz-name').value.trim(),
       ...conn,
       clearApiKey: Boolean(document.getElementById('ig-wz-key-clear')?.checked),
       retentionDays: Number(document.getElementById('ig-wz-retention').value),
@@ -86,7 +88,7 @@ function init() {
       if (!res.ok) return;
       toast(
         res.data.wizard.enabled
-          ? 'Wizard enabled. Players can say @wizard.'
+          ? `Chatbot enabled. Players can say @${res.data.wizard.invocationName}.`
           : 'Wizard settings saved; chatbot is disabled.'
       );
       document.getElementById('ig-wz-key').value = '';
@@ -107,7 +109,7 @@ function init() {
         line.className = 'border-b border-line py-2 last:border-0';
         const meta = document.createElement('div');
         meta.className = 'mb-1 text-ink-faint';
-        meta.textContent = `${row.created_at} · ${row.player} · ${row.role}`;
+        meta.textContent = `${row.created_at} · ${row.speaker}`;
         const content = document.createElement('div');
         content.className = row.role === 'error' ? 'text-danger' : 'whitespace-pre-wrap text-ink-soft';
         content.textContent = row.content;

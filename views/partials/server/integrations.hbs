@@ -5,13 +5,21 @@
     <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
       <div>
         <h3 class="flex items-center gap-2 font-semibold">{{{icon 'sparkles' 'size-4 text-link'}}} Wizard chatbot</h3>
-        <p class="mt-1 text-xs text-ink-faint">Players invoke the conversational wizard with <code class="rounded bg-inset px-1">@wizard</code>. Configuration and transcripts are visible only to admins.</p>
+        <p class="mt-1 text-xs text-ink-faint">Players invoke this chatbot with <code class="rounded bg-inset px-1">@{{integrations.wizard.invocationName}}</code>. Configuration and transcripts are visible only to admins.</p>
       </div>
       <span class="msm-toggle"><input type="checkbox" id="ig-wz-enabled" {{#if integrations.wizard.enabled}}checked{{/if}}><span></span></span>
     </div>
 
     <div class="grid gap-4 lg:grid-cols-2">
       <div class="space-y-4">
+        <div>
+          <label class="label" for="ig-wz-name">Invocation name</label>
+          <div class="flex items-center gap-1">
+            <span class="font-mono text-sm text-ink-faint">@</span>
+            <input class="input font-mono text-xs" id="ig-wz-name" maxlength="32" pattern="[A-Za-z][A-Za-z0-9_-]{0,31}" value="{{integrations.wizard.invocationName}}" placeholder="wizard">
+          </div>
+          <p class="help">Players call the chatbot with this name, for example <code class="rounded bg-inset px-1">@bubba</code>. It also becomes the chatbot's chat and transcript label.</p>
+        </div>
         <div>
           <label class="label" for="ig-wz-url">OpenAI-compatible base URL</label>
           <input class="input font-mono text-xs" id="ig-wz-url" value="{{integrations.wizard.baseUrl}}" placeholder="http://192.168.1.50:11434">
