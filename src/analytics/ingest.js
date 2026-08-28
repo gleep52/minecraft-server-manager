@@ -111,10 +111,26 @@ function handleLine(serverId, line) {
   const raw = rest;
   const evt = classify(raw);
   if (!evt) return;
+  const eventTs = dockerTs || buildTs(evt.time);
+  let inserted = false;
   try {
-    insertEvent(serverId, evt, dockerTs || buildTs(evt.time), raw);
+    inserted = insertEvent(serverId, evt, eventTs, raw);
   } catch (err) {
     console.error(`[analytics] insert failed for ${serverId}:`, err.message);
+  }
+  if (inserted && (evt.type === 'join' || evt.type === 'leave')) {
+    try {
+      const wizard = require('../services/wizard');
+      if (evt.type === 'join') {
+        wizard
+          .handleJoin(serverId, evt.player, eventTs)
+          .catch((err) => console.error(`[wizard] join ${serverId}:`, err.message));
+      } else {
+        wizard.handleLeave(serverId, evt.player);
+      }
+    } catch (err) {
+      console.error(`[wizard] presence ${serverId}:`, err.message);
+    }
   }
   // Custom chat commands (!rtp2 …): fire-and-forget — a broken command handler
   // must never break log ingestion. Lazy require avoids any module cycle.

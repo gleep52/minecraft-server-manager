@@ -47,6 +47,8 @@ test('wizard configuration and transcripts are admin-only', async () => {
   assert.match(adminPage.text, /Wizard chatbot/);
   assert.match(adminPage.text, /Refresh this server's transcripts/);
   assert.match(adminPage.text, /Refresh power audit/);
+  assert.match(adminPage.text, /Player outreach/);
+  assert.match(adminPage.text, /@wizard chat/);
   const giftTextarea = /id="ig-wz-gifts">([\s\S]*?)<\/textarea>/.exec(adminPage.text);
   assert.ok(giftTextarea);
   assert.deepEqual(giftTextarea[1].replaceAll('&#10;', '\n').split('\n'), [
@@ -61,6 +63,9 @@ test('per-server config encrypts the API key and defaults retention to seven day
   const initial = await app.req('GET', `/api/servers/${serverId}/wizard`, { cookie: adminCookie });
   assert.equal(initial.json.wizard.retentionDays, 7);
   assert.equal(initial.json.wizard.invocationName, 'wizard');
+  assert.equal(initial.json.wizard.welcomeEnabled, true);
+  assert.equal(initial.json.wizard.checkinMinutes, 15);
+  assert.equal(initial.json.wizard.conversationMinutes, 5);
   assert.equal(initial.json.wizard.powersEnabled, false);
   assert.equal(initial.json.wizard.powersDryRun, true);
 
@@ -74,6 +79,11 @@ test('per-server config encrypts the API key and defaults retention to seven day
       apiKey: 'not-plaintext-in-db',
       systemPrompt: 'You are the test wizard.',
       retentionDays: 14,
+      welcomeEnabled: true,
+      welcomeMessage: 'Greetings {player}; I am {wizard}. Call {mention}.',
+      checkinMinutes: 20,
+      checkinMessage: '{player}, checking in after {minutes} minutes.',
+      conversationMinutes: 7,
     },
   });
   assert.equal(saved.status, 200);
@@ -82,6 +92,8 @@ test('per-server config encrypts the API key and defaults retention to seven day
   const stored = db.get('SELECT * FROM wizard_configs WHERE server_id = ?', serverId);
   assert.notEqual(stored.api_key_cipher, 'not-plaintext-in-db');
   assert.equal(stored.invocation_name, 'bubba');
+  assert.equal(stored.checkin_minutes, 20);
+  assert.equal(saved.json.wizard.conversationMinutes, 7);
   assert.equal(wizard.getConfig(serverId, { includeSecret: true }).apiKey, 'not-plaintext-in-db');
 });
 
@@ -314,6 +326,76 @@ test('invocation names reject ambiguous or unsafe values', async () => {
     });
     assert.equal(res.status, 400, invocationName);
   }
+});
+
+test('join greetings and playtime check-ins send once per player session', async () => {
+  wizard.saveConfig(serverId, {
+    enabled: true,
+    baseUrl: 'http://127.0.0.1:11434',
+    model: 'qwen:test',
+    invocationName: 'bubba',
+    systemPrompt: 'Test',
+    retentionDays: 7,
+    welcomeEnabled: true,
+    welcomeMessage: 'Welcome {player}; I am {wizard}. Use {mention}.',
+    checkinMinutes: 15,
+    checkinMessage: '{player}, it has been {minutes} minutes. Need help from {wizard}?',
+    conversationMinutes: 5,
+  });
+  const sent = [];
+  const send = async (id, cfg, target, text) => sent.push({ id, cfg, target, text });
+  const joinedAt = '2026-08-28T12:00:00.000Z';
+  assert.equal(await wizard.handleJoin(serverId, 'Gleep52', joinedAt, { send }), true);
+  assert.equal(await wizard.handleJoin(serverId, 'Gleep52', joinedAt, { send }), false);
+  assert.deepEqual(sent[0], {
+    id: serverId,
+    cfg: wizard.getConfig(serverId),
+    target: '@a',
+    text: 'Welcome Gleep52; I am Bubba. Use @bubba.',
+  });
+
+  db.run('INSERT INTO player_sessions (server_id, player, started_at) VALUES (?, ?, ?)', serverId, 'Gleep52', joinedAt);
+  const now = new Date('2026-08-28T12:16:00.000Z');
+  assert.equal(await wizard.processCheckins({ now, send }), 1);
+  assert.equal(await wizard.processCheckins({ now, send }), 0);
+  assert.equal(sent[1].target, 'Gleep52');
+  assert.equal(sent[1].text, 'Gleep52, it has been 15 minutes. Need help from Bubba?');
+  db.run(
+    'UPDATE player_sessions SET ended_at = ? WHERE server_id = ? AND ended_at IS NULL',
+    now.toISOString(),
+    serverId
+  );
+});
+
+test('outreach timing is bounded by the admin-only API', async () => {
+  const invalid = await app.req('POST', `/api/servers/${serverId}/wizard`, {
+    cookie: adminCookie,
+    body: {
+      enabled: true,
+      baseUrl: 'http://127.0.0.1:11434',
+      model: 'qwen:test',
+      systemPrompt: 'Test',
+      retentionDays: 7,
+      checkinMinutes: 1441,
+      conversationMinutes: 61,
+    },
+  });
+  assert.equal(invalid.status, 400);
+});
+
+test('conversation mode is explicitly opened, expires, and closes when the player leaves', async () => {
+  assert.equal(wizard.conversationCommand('chat'), 'open');
+  assert.equal(wizard.conversationCommand("let's talk"), 'open');
+  assert.equal(wizard.conversationCommand('bye'), 'close');
+  assert.equal(wizard.conversationCommand('how are you?'), null);
+  const start = Date.parse('2026-08-28T12:00:00.000Z');
+  assert.equal(wizard.conversationActive(serverId, 'Gleep52', start), false);
+  wizard.openConversation(serverId, 'Gleep52', 5, start);
+  assert.equal(wizard.conversationActive(serverId, 'Gleep52', start + 299_999), true);
+  assert.equal(wizard.conversationActive(serverId, 'Gleep52', start + 300_000), false);
+  wizard.openConversation(serverId, 'Gleep52', 5, start);
+  wizard.handleLeave(serverId, 'Gleep52');
+  assert.equal(wizard.conversationActive(serverId, 'Gleep52', start + 1), false);
 });
 
 test('retention pruning preserves recent rows and removes expired rows', () => {

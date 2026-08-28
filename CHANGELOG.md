@@ -5,6 +5,26 @@ All notable changes to this project are documented here. The format is based on
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Each push is cut as a new release with
 its own dated entry.
 
+## [0.13.0] - 2026-08-28
+
+### Added
+
+- The Wizard can greet players when they join with a customizable message that advertises its
+  role and current invocation name. Greetings are broadcast once per play session and support
+  `{player}`, `{wizard}`, and `{mention}` placeholders.
+- A configurable playtime check-in privately contacts each player once after 0–1440 minutes online;
+  `0` disables it. Durable per-session markers prevent repeats after panel restarts.
+- Players can explicitly open a per-player conversation window with `@wizard chat`, reply without
+  repeating the mention, and close it with `@wizard bye`. The timeout is configurable from 0–60
+  minutes; ordinary chat is never captured unless the player opts in, and command/mention-prefixed
+  messages remain outside the conversation.
+
+### Changed
+
+- Player outreach and conversation settings are configurable per server on the admin-only
+  Integrations page. Outreach uses reviewed templates rather than spending an LLM request or
+  generating an unpredictable greeting on every join.
+
 ## [0.12.2] - 2026-08-28
 
 ### Fixed

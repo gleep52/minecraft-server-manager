@@ -17,12 +17,21 @@ const DEFAULT_PROMPT =
   'Address players by name when natural. Keep every response under 350 characters. ' +
   'You may converse, tell stories, tease gently, and offer Minecraft advice. ' +
   'Never claim that you performed a gameplay action unless an available tool completed successfully.';
+const DEFAULT_WELCOME_MESSAGE =
+  "Welcome, {player}! I am {wizard}, this server's resident guide and conversational companion. " +
+  'Ask me for help—or just chat—by writing {mention} followed by your message.';
+const DEFAULT_CHECKIN_MESSAGE =
+  '{player}, you have been exploring for a while. How are you doing? ' +
+  'If you need help or company, say {mention} followed by your message.';
 const INVOCATION_NAME_RE = /^[A-Za-z][A-Za-z0-9_-]{0,31}$/;
 const MAX_REPLY = 350;
 const HISTORY_MESSAGES = 20;
 const REQUEST_TIMEOUT_MS = 30_000;
 const inflight = new Set();
 const cooldowns = new Map();
+const conversationWindows = new Map();
+let outreachTimer = null;
+let outreachRunning = false;
 
 function normalizeInvocationName(raw) {
   const name = String(raw || 'wizard').trim();
@@ -43,6 +52,14 @@ function invocationPattern(name = 'wizard') {
 function assistantLabel(name = 'wizard') {
   const normalized = normalizeInvocationName(name);
   return normalized[0].toUpperCase() + normalized.slice(1);
+}
+
+function normalizeOutreachMessage(raw, fallback) {
+  const message = String(raw ?? fallback)
+    .replace(/[\r\n\x00-\x1f\x7f]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return (message || fallback).slice(0, 400);
 }
 
 const TRIGGER_RE = invocationPattern('wizard');
@@ -70,6 +87,11 @@ function getConfig(serverId, { includeSecret = false } = {}) {
     invocationName: (r && r.invocation_name) || 'wizard',
     systemPrompt: (r && r.system_prompt) || DEFAULT_PROMPT,
     retentionDays: r ? r.retention_days : 7,
+    welcomeEnabled: r ? Boolean(r.welcome_enabled) : true,
+    welcomeMessage: (r && r.welcome_message) || DEFAULT_WELCOME_MESSAGE,
+    checkinMinutes: r ? r.checkin_minutes : 15,
+    checkinMessage: (r && r.checkin_message) || DEFAULT_CHECKIN_MESSAGE,
+    conversationMinutes: r ? r.conversation_minutes : 5,
     hasApiKey: Boolean(key),
     powersEnabled: Boolean(r && r.powers_enabled),
     powersDryRun: r ? Boolean(r.powers_dry_run) : true,
@@ -123,6 +145,17 @@ function saveConfig(serverId, input, _options = {}) {
   const retentionDays = Math.max(0, Math.min(3650, Math.trunc(Number(input.retentionDays))));
   const prompt = String(input.systemPrompt || '').trim() || DEFAULT_PROMPT;
   const priorCfg = getConfig(serverId);
+  const welcomeEnabled = input.welcomeEnabled ?? priorCfg.welcomeEnabled;
+  const welcomeMessage = normalizeOutreachMessage(input.welcomeMessage, priorCfg.welcomeMessage);
+  const checkinMinutes = Math.trunc(Number(input.checkinMinutes ?? priorCfg.checkinMinutes));
+  const checkinMessage = normalizeOutreachMessage(input.checkinMessage, priorCfg.checkinMessage);
+  const conversationMinutes = Math.trunc(Number(input.conversationMinutes ?? priorCfg.conversationMinutes));
+  if (!Number.isInteger(checkinMinutes) || checkinMinutes < 0 || checkinMinutes > 1440) {
+    throw httpError(400, 'Wizard check-in time must be between 0 and 1440 minutes');
+  }
+  if (!Number.isInteger(conversationMinutes) || conversationMinutes < 0 || conversationMinutes > 60) {
+    throw httpError(400, 'Wizard conversation mode must be between 0 and 60 minutes');
+  }
   const powerTesters = wizardPowers.normalizeTesters(input.powerTesters ?? priorCfg.powerTesters);
   const powerFlags = wizardPowers.normalizeFlags(input.powerFlags ?? priorCfg.powerFlags);
   const giftItems = wizardPowers.normalizeGiftItems(input.giftItems ?? priorCfg.giftItems);
@@ -139,8 +172,9 @@ function saveConfig(serverId, input, _options = {}) {
     `INSERT INTO wizard_configs
        (server_id, enabled, base_url, model, api_key_cipher, system_prompt, retention_days, invocation_name,
         powers_enabled, powers_dry_run, power_testers_json, power_flags_json, gift_items_json,
-        gift_max_count, power_cooldown_sec, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        gift_max_count, power_cooldown_sec, welcome_enabled, welcome_message, checkin_minutes,
+        checkin_message, conversation_minutes, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
      ON CONFLICT(server_id) DO UPDATE SET
        enabled = excluded.enabled, base_url = excluded.base_url, model = excluded.model,
        api_key_cipher = excluded.api_key_cipher, system_prompt = excluded.system_prompt,
@@ -149,6 +183,9 @@ function saveConfig(serverId, input, _options = {}) {
        power_testers_json = excluded.power_testers_json, power_flags_json = excluded.power_flags_json,
        gift_items_json = excluded.gift_items_json, gift_max_count = excluded.gift_max_count,
        power_cooldown_sec = excluded.power_cooldown_sec,
+       welcome_enabled = excluded.welcome_enabled, welcome_message = excluded.welcome_message,
+       checkin_minutes = excluded.checkin_minutes, checkin_message = excluded.checkin_message,
+       conversation_minutes = excluded.conversation_minutes,
        updated_at = datetime('now')`,
     serverId,
     input.enabled ? 1 : 0,
@@ -164,7 +201,12 @@ function saveConfig(serverId, input, _options = {}) {
     JSON.stringify(powerFlags),
     JSON.stringify(giftItems),
     giftMaxCount,
-    powerCooldownSec
+    powerCooldownSec,
+    welcomeEnabled ? 1 : 0,
+    welcomeMessage,
+    checkinMinutes,
+    checkinMessage,
+    conversationMinutes
   );
   pruneTranscripts(serverId);
   return getConfig(serverId);
@@ -416,14 +458,201 @@ function pruneTranscripts(serverId = null) {
     )`);
 }
 
+function pruneOutreach(days = 90) {
+  const bounded = Math.max(1, Math.min(3650, Math.trunc(Number(days)) || 90));
+  return db.run("DELETE FROM wizard_outreach WHERE session_started_at < datetime('now', ?)", `-${bounded} days`);
+}
+
+function renderOutreachMessage(template, cfg, player) {
+  const replacements = {
+    player: String(player),
+    wizard: assistantLabel(cfg.invocationName),
+    mention: `@${cfg.invocationName}`,
+    minutes: String(cfg.checkinMinutes),
+  };
+  return normalizeOutreachMessage(template, DEFAULT_CHECKIN_MESSAGE)
+    .replace(/\{(player|wizard|mention|minutes)\}/gi, (_match, key) => replacements[key.toLowerCase()])
+    .slice(0, 450);
+}
+
+async function sendWizardText(serverId, cfg, target, text) {
+  await chat.sendChat(serverId, {
+    actor: cfg.invocationName,
+    target,
+    text: `[${assistantLabel(cfg.invocationName)}] ${text}`,
+    color: 'light_purple',
+    italic: true,
+  });
+}
+
+function claimOutreach(serverId, player, sessionStartedAt, field, now) {
+  if (!['welcomed_at', 'checked_in_at'].includes(field)) throw new Error('Invalid Wizard outreach field');
+  db.run(
+    `INSERT OR IGNORE INTO wizard_outreach (server_id, player, session_started_at)
+     VALUES (?, ?, ?)`,
+    serverId,
+    player,
+    sessionStartedAt
+  );
+  return (
+    Number(
+      db.run(
+        `UPDATE wizard_outreach SET ${field} = ?
+         WHERE server_id = ? AND player = ? AND session_started_at = ? AND ${field} IS NULL`,
+        now,
+        serverId,
+        player,
+        sessionStartedAt
+      ).changes
+    ) === 1
+  );
+}
+
+async function handleJoin(serverId, player, joinedAt = new Date().toISOString(), { send = sendWizardText } = {}) {
+  // A join always starts a fresh interaction context, even when greetings are
+  // disabled or the prior disconnect line was missed.
+  closeConversation(serverId, player);
+  const cfg = getConfig(serverId);
+  if (!cfg.enabled || !cfg.welcomeEnabled || !PLAYER_NAME_RE.test(String(player))) return false;
+  const now = new Date().toISOString();
+  if (!claimOutreach(serverId, player, joinedAt, 'welcomed_at', now)) return false;
+  const message = renderOutreachMessage(cfg.welcomeMessage, cfg, player);
+  try {
+    await send(serverId, cfg, '@a', message);
+    insertTranscript(serverId, player, 'assistant', message);
+    return true;
+  } catch (err) {
+    insertTranscript(serverId, player, 'error', `Join greeting failed: ${String(err.message || err)}`);
+    console.warn(`[wizard] join greeting ${serverId}/${player}: ${err.message}`);
+    return false;
+  }
+}
+
+async function processCheckins({ now = new Date(), send = sendWizardText } = {}) {
+  const nowMs = now.getTime();
+  const rows = db.all(
+    `SELECT ps.server_id, ps.player, ps.started_at
+     FROM player_sessions ps JOIN wizard_configs c ON c.server_id = ps.server_id
+     WHERE ps.ended_at IS NULL AND c.enabled = 1 AND c.checkin_minutes > 0`
+  );
+  let sent = 0;
+  for (const row of rows) {
+    const cfg = getConfig(row.server_id);
+    const startedMs = Date.parse(row.started_at);
+    if (!Number.isFinite(startedMs) || nowMs - startedMs < cfg.checkinMinutes * 60_000) continue;
+    if (!claimOutreach(row.server_id, row.player, row.started_at, 'checked_in_at', now.toISOString())) continue;
+    // The player may have left between the candidate query and this claim.
+    if (
+      !db.get(
+        'SELECT 1 FROM player_sessions WHERE server_id = ? AND player = ? AND started_at = ? AND ended_at IS NULL',
+        row.server_id,
+        row.player,
+        row.started_at
+      )
+    ) {
+      continue;
+    }
+    const message = renderOutreachMessage(cfg.checkinMessage, cfg, row.player);
+    try {
+      await send(row.server_id, cfg, row.player, message);
+      insertTranscript(row.server_id, row.player, 'assistant', message);
+      sent += 1;
+    } catch (err) {
+      insertTranscript(row.server_id, row.player, 'error', `Check-in failed: ${String(err.message || err)}`);
+      console.warn(`[wizard] check-in ${row.server_id}/${row.player}: ${err.message}`);
+    }
+  }
+  return sent;
+}
+
+function startOutreachWatcher({ intervalMs = 30_000 } = {}) {
+  if (outreachTimer) return;
+  const run = async () => {
+    if (outreachRunning) return;
+    outreachRunning = true;
+    try {
+      await processCheckins();
+    } catch (err) {
+      console.error('[wizard] outreach watcher:', err.message);
+    } finally {
+      outreachRunning = false;
+    }
+  };
+  run();
+  outreachTimer = setInterval(run, intervalMs);
+  outreachTimer.unref?.();
+}
+
+function stopOutreachWatcher() {
+  if (outreachTimer) clearInterval(outreachTimer);
+  outreachTimer = null;
+}
+
+function conversationKey(serverId, player) {
+  return `${serverId}:${String(player).toLowerCase()}`;
+}
+
+function conversationActive(serverId, player, now = Date.now()) {
+  const key = conversationKey(serverId, player);
+  const expiresAt = conversationWindows.get(key) || 0;
+  if (expiresAt <= now) {
+    conversationWindows.delete(key);
+    return false;
+  }
+  return true;
+}
+
+function openConversation(serverId, player, minutes, now = Date.now()) {
+  conversationWindows.set(conversationKey(serverId, player), now + minutes * 60_000);
+}
+
+function closeConversation(serverId, player) {
+  return conversationWindows.delete(conversationKey(serverId, player));
+}
+
+function handleLeave(serverId, player) {
+  closeConversation(serverId, player);
+}
+
+function conversationCommand(text) {
+  const value = String(text || '').trim();
+  if (/^(?:chat|conversation|talk)(?:\s+mode)?$|^let'?s\s+(?:chat|talk)$/i.test(value)) return 'open';
+  if (/^(?:bye|goodbye|stop|stop\s+chat|close\s+chat)$/i.test(value)) return 'close';
+  return null;
+}
+
 async function handleChat(serverId, player, message) {
   const cfg = getConfig(serverId);
   if (!cfg.enabled || !PLAYER_NAME_RE.test(String(player))) return false;
-  const match = invocationPattern(cfg.invocationName).exec(String(message || '').trim());
-  if (!match) return false;
+  const raw = String(message || '').trim();
+  const match = invocationPattern(cfg.invocationName).exec(raw);
+  const activeConversation = cfg.conversationMinutes > 0 && conversationActive(serverId, player);
+  if (!match && (!activeConversation || !raw || /^[!/@]/.test(raw))) return false;
   const label = assistantLabel(cfg.invocationName);
-  const prompt = (match[1] || `Greetings, ${label}.`).trim().slice(0, 1000);
-  const key = `${serverId}:${String(player).toLowerCase()}`;
+  const invokedText = match ? String(match[1] || '').trim() : '';
+  const modeCommand = match ? conversationCommand(invokedText) : null;
+  if (modeCommand === 'open') {
+    if (activeConversation) {
+      openConversation(serverId, player, cfg.conversationMinutes);
+      return true;
+    }
+    const reply = cfg.conversationMinutes
+      ? `Conversation mode is open for ${cfg.conversationMinutes} minute${cfg.conversationMinutes === 1 ? '' : 's'}. You can reply without @${cfg.invocationName}; say @${cfg.invocationName} bye to close it.`
+      : `Conversation mode is disabled on this server. Keep using @${cfg.invocationName} before each message.`;
+    if (cfg.conversationMinutes) openConversation(serverId, player, cfg.conversationMinutes);
+    insertTranscript(serverId, player, 'assistant', reply);
+    await sendWizardText(serverId, cfg, player, reply).catch(() => {});
+    return true;
+  }
+  if (modeCommand === 'close') {
+    if (!closeConversation(serverId, player)) return true;
+    const reply = `Conversation mode is closed. Call @${cfg.invocationName} whenever you need me.`;
+    insertTranscript(serverId, player, 'assistant', reply);
+    await sendWizardText(serverId, cfg, player, reply).catch(() => {});
+    return true;
+  }
+  const prompt = (match ? invokedText || `Greetings, ${label}.` : raw).slice(0, 1000);
+  const key = conversationKey(serverId, player);
   if (inflight.has(key)) return true;
   const last = cooldowns.get(key) || 0;
   if (Date.now() - last < 3000) return true;
@@ -446,6 +675,7 @@ async function handleChat(serverId, player, message) {
         preserveNewlines: true,
         separateLines: true,
       });
+      if (conversationActive(serverId, player)) openConversation(serverId, player, cfg.conversationMinutes);
       return true;
     }
     const { message, cfg: powerCfg } = await completionMessage(serverId, player, prompt, { allowPowers: true });
@@ -469,6 +699,7 @@ async function handleChat(serverId, player, message) {
       color: 'light_purple',
       italic: true,
     });
+    if (conversationActive(serverId, player)) openConversation(serverId, player, cfg.conversationMinutes);
     return true;
   } catch (err) {
     // If delivery failed after a successful completion, the exchange is already
@@ -500,6 +731,8 @@ async function handleChat(serverId, player, message) {
 
 module.exports = {
   DEFAULT_PROMPT,
+  DEFAULT_WELCOME_MESSAGE,
+  DEFAULT_CHECKIN_MESSAGE,
   TRIGGER_RE,
   INVOCATION_NAME_RE,
   normalizeInvocationName,
@@ -511,10 +744,22 @@ module.exports = {
   complete,
   testConnection,
   handleChat,
+  handleJoin,
+  handleLeave,
+  renderOutreachMessage,
+  processCheckins,
+  startOutreachWatcher,
+  stopOutreachWatcher,
+  conversationActive,
+  openConversation,
+  closeConversation,
+  conversationCommand,
   listTranscripts,
   clearTranscripts,
   pruneTranscripts,
+  pruneOutreach,
   normalizeBaseUrl,
   completionMessage,
   cleanReply,
+  normalizeOutreachMessage,
 };
