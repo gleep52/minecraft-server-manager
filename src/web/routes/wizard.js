@@ -59,6 +59,7 @@ router.post(
         powersEnabled: z.boolean().optional(),
         powersDryRun: z.boolean().optional(),
         powerTesters: z.array(z.string().trim().min(1).max(32)).max(50).optional(),
+        powerControllers: z.array(z.string().trim().min(1).max(32)).max(50).optional(),
         powerFlags: z
           .object({
             heal: z.boolean(),

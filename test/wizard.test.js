@@ -49,6 +49,7 @@ test('wizard configuration and transcripts are admin-only', async () => {
   assert.match(adminPage.text, /Refresh power audit/);
   assert.match(adminPage.text, /Player outreach/);
   assert.match(adminPage.text, /@wizard chat/);
+  assert.match(adminPage.text, /Power controllers/);
   const giftTextarea = /id="ig-wz-gifts">([\s\S]*?)<\/textarea>/.exec(adminPage.text);
   assert.ok(giftTextarea);
   assert.deepEqual(giftTextarea[1].replaceAll('&#10;', '\n').split('\n'), [
@@ -68,6 +69,7 @@ test('per-server config encrypts the API key and defaults retention to seven day
   assert.equal(initial.json.wizard.conversationMinutes, 5);
   assert.equal(initial.json.wizard.powersEnabled, false);
   assert.equal(initial.json.wizard.powersDryRun, true);
+  assert.deepEqual(initial.json.wizard.powerControllers, []);
 
   const saved = await app.req('POST', `/api/servers/${serverId}/wizard`, {
     cookie: adminCookie,
@@ -110,6 +112,7 @@ test('power configuration is per-server, bounded, and admin-only', async () => {
       powersEnabled: true,
       powersDryRun: true,
       powerTesters: ['Gleep52'],
+      powerControllers: ['Gleep52'],
       powerFlags: { heal: true, feed: true, spawn: true, time: false, weather: true, gift: true },
       giftItems: ['minecraft:bread', 'minecraft:torch'],
       giftMaxCount: 8,
@@ -118,6 +121,7 @@ test('power configuration is per-server, bounded, and admin-only', async () => {
   });
   assert.equal(saved.status, 200);
   assert.deepEqual(saved.json.wizard.powerTesters, ['Gleep52']);
+  assert.deepEqual(saved.json.wizard.powerControllers, ['Gleep52']);
   assert.deepEqual(saved.json.wizard.giftItems, ['minecraft:bread', 'minecraft:torch']);
   assert.equal(saved.json.wizard.giftMaxCount, 8);
   assert.equal(saved.json.wizard.powerFlags.time, false);
@@ -138,9 +142,10 @@ test('power configuration is per-server, bounded, and admin-only', async () => {
 
 test('power tools can only affect the caller and reject injected arguments', () => {
   const cfg = wizard.getConfig(serverId);
-  const tools = wizardPowers.toolsFor(cfg, 'Gleep52');
+  const selfOnlyCfg = { ...cfg, powerControllers: [] };
+  const tools = wizardPowers.toolsFor(selfOnlyCfg, 'Gleep52');
   assert.ok(tools.length > 0);
-  assert.equal(wizardPowers.toolsFor(cfg, 'SomeoneElse').length, 0);
+  assert.equal(wizardPowers.toolsFor(selfOnlyCfg, 'SomeoneElse').length, 0);
   const serialized = JSON.stringify(tools);
   assert.doesNotMatch(serialized, /target|selector|command|rcon/i);
 
@@ -202,6 +207,86 @@ test('power tools can only affect the caller and reject injected arguments', () 
   );
 });
 
+test('power controllers receive only bounded cross-player tools with exact targets', () => {
+  const cfg = wizard.getConfig(serverId);
+  const names = (prompt, override = cfg) =>
+    wizardPowers.toolsFor(override, 'Gleep52', prompt).map((tool) => tool.function.name);
+  assert.deepEqual(names('teleport @PlayerA to me'), ['teleport_player_to_self']);
+  assert.deepEqual(names('teleport me to PlayerA'), ['teleport_self_to_player']);
+  assert.deepEqual(names('heal PlayerA'), ['heal_player']);
+  assert.deepEqual(names('feed PlayerA'), ['feed_player']);
+  assert.deepEqual(names('give PlayerA four torches'), ['give_player']);
+
+  const controllerOnly = { ...cfg, powerTesters: [] };
+  assert.deepEqual(names('heal me', controllerOnly), []);
+  assert.deepEqual(names('heal PlayerA', controllerOnly), ['heal_player']);
+
+  const request = wizardPowers.parseToolCall(
+    { tool_calls: [{ function: { name: 'teleport_player_to_self', arguments: '{"target":"@PlayerA"}' } }] },
+    cfg,
+    'Gleep52',
+    'teleport @PlayerA to me'
+  );
+  assert.deepEqual(request.args, { target: 'PlayerA' });
+  const gift = wizardPowers.parseToolCall(
+    {
+      tool_calls: [
+        {
+          function: {
+            name: 'give_player',
+            arguments: '{"target":"PlayerA","item":"minecraft:torch","count":4}',
+          },
+        },
+      ],
+    },
+    cfg,
+    'Gleep52',
+    'give PlayerA four torches'
+  );
+  assert.deepEqual(gift.args, { target: 'PlayerA', item: 'minecraft:torch', count: 4 });
+  assert.throws(
+    () =>
+      wizardPowers.parseToolCall(
+        {
+          tool_calls: [
+            {
+              function: {
+                name: 'give_player',
+                arguments: '{"target":"PlayerA","item":"minecraft:diamond","count":4}',
+              },
+            },
+          ],
+        },
+        cfg,
+        'Gleep52',
+        'give PlayerA four diamonds'
+      ),
+    /outside the allowlist/
+  );
+  assert.throws(
+    () =>
+      wizardPowers.parseToolCall(
+        { tool_calls: [{ function: { name: 'teleport_player_to_self', arguments: '{"target":"@a"}' } }] },
+        cfg,
+        'Gleep52',
+        'teleport @a to me'
+      ),
+    /selectors/
+  );
+  assert.throws(
+    () =>
+      wizardPowers.parseToolCall(
+        { tool_calls: [{ function: { name: 'heal_player', arguments: '{"target":"Gleep52"}' } }] },
+        cfg,
+        'Gleep52',
+        'heal Gleep52'
+      ),
+    /one other player/
+  );
+  assert.equal(wizardPowers.matchOnlineTarget('playera', ['Gleep52', 'PlayerA']), 'PlayerA');
+  assert.throws(() => wizardPowers.matchOnlineTarget('PlayerB', ['PlayerA']), /not online/);
+});
+
 test('power intent requires an explicit action and keeps recipe questions conversational', () => {
   const cfg = wizard.getConfig(serverId);
   const names = (prompt) => wizardPowers.toolsFor(cfg, 'Gleep52', prompt).map((tool) => tool.function.name);
@@ -212,6 +297,7 @@ test('power intent requires an explicit action and keeps recipe questions conver
   assert.deepEqual(names('can I have a light?'), ['give_self']);
   assert.deepEqual(names('make it rain please'), ['set_weather']);
   assert.deepEqual(names('teleport me home'), ['teleport_self_to_spawn']);
+  assert.deepEqual(names('teleport PlayerA to me'), ['teleport_player_to_self']);
 
   assert.throws(
     () =>
@@ -270,9 +356,18 @@ test('dry-run powers write a complete audit event without executing RCON', async
   assert.equal(result.dryRun, true);
   const immediateSecondDryRun = await wizardPowers.execute(serverId, 'Gleep52', { name: 'heal_self', args: {} }, cfg);
   assert.equal(immediateSecondDryRun.dryRun, true);
+  const crossPlayer = await wizardPowers.execute(
+    serverId,
+    'Gleep52',
+    { name: 'teleport_player_to_self', args: { target: 'PlayerA' } },
+    cfg
+  );
+  assert.match(crossPlayer.message, /teleport PlayerA to Gleep52/);
   const audit = wizardPowers.listAudit(serverId, 10);
-  assert.match(audit[0].summary, /Dry run: Gleep52 would restore full health/);
-  assert.equal(audit[0].details.power, 'heal_self');
+  assert.match(audit[0].summary, /Dry run: Gleep52 would teleport PlayerA to Gleep52/);
+  assert.equal(audit[0].details.power, 'teleport_player_to_self');
+  assert.equal(audit[0].details.caller, 'Gleep52');
+  assert.equal(audit[0].details.target, 'PlayerA');
   assert.equal(audit[0].details.dryRun, true);
 });
 

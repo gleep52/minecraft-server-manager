@@ -44,6 +44,15 @@ function normalizeTesters(value) {
   return names;
 }
 
+function normalizeControllers(value) {
+  const names = uniqueStrings(value);
+  if (names.length > 50) throw httpError(400, 'At most 50 Wizard power controllers may be configured');
+  if (names.some((name) => !PLAYER_NAME_RE.test(name))) {
+    throw httpError(400, 'Power controllers must be valid Minecraft player names');
+  }
+  return names;
+}
+
 function normalizeGiftItems(value) {
   const items = uniqueStrings(value).map((item) => item.toLowerCase());
   if (items.length > 100) throw httpError(400, 'At most 100 gift items may be configured');
@@ -60,6 +69,28 @@ function normalizeFlags(value = {}) {
 function isTester(cfg, player) {
   const wanted = String(player || '').toLowerCase();
   return cfg.powerTesters.some((name) => name.toLowerCase() === wanted);
+}
+
+function isController(cfg, player) {
+  const wanted = String(player || '').toLowerCase();
+  return (cfg.powerControllers || []).some((name) => name.toLowerCase() === wanted);
+}
+
+function normalizePowerTarget(value) {
+  let target = String(value || '').trim();
+  if (/^@[aeprs]$/i.test(target)) throw httpError(400, 'Minecraft selectors are not valid Wizard targets');
+  if (target.startsWith('@')) target = target.slice(1);
+  if (!PLAYER_NAME_RE.test(target)) throw httpError(400, 'The Wizard requested an invalid target player');
+  return target;
+}
+
+function matchOnlineTarget(value, onlineNames) {
+  const target = normalizePowerTarget(value);
+  const exact = (Array.isArray(onlineNames) ? onlineNames : []).find(
+    (name) => String(name).toLowerCase() === target.toLowerCase()
+  );
+  if (!exact) throw httpError(404, `${target} is not online`);
+  return exact;
 }
 
 const INFORMATION_RE =
@@ -90,9 +121,37 @@ function powerIntent(prompt) {
   };
 }
 
+const PLAYER_TOKEN = '@?[.*]?[A-Za-z0-9_]{1,16}';
+
+function crossPowerIntent(prompt) {
+  if (prompt === null || prompt === undefined) {
+    return { heal: true, feed: true, teleportToSelf: true, teleportSelfToPlayer: true, gift: true };
+  }
+  const text = String(prompt).trim();
+  if (!text || INFORMATION_RE.test(text)) {
+    return { heal: false, feed: false, teleportToSelf: false, teleportSelfToPlayer: false, gift: false };
+  }
+  return {
+    heal: new RegExp(`\\b(?:heal|cure|revive)\\s+(?!me\\b)${PLAYER_TOKEN}(?:\\b|$)`, 'i').test(text),
+    feed: new RegExp(`\\b(?:feed|saturate)\\s+(?!me\\b)${PLAYER_TOKEN}(?:\\b|$)`, 'i').test(text),
+    teleportToSelf: new RegExp(
+      `\\b(?:teleport|tp|bring|send)\\s+(?!me\\b)${PLAYER_TOKEN}\\s+(?:to\\s+me|here)\\b`,
+      'i'
+    ).test(text),
+    teleportSelfToPlayer: new RegExp(
+      `\\b(?:teleport|tp|send|take)\\s+me\\s+to\\s+(?!(?:spawn|home)\\b)${PLAYER_TOKEN}(?:\\b|$)`,
+      'i'
+    ).test(text),
+    gift: new RegExp(`\\b(?:give|grant|hand)\\s+(?!me\\b|us\\b)${PLAYER_TOKEN}(?:\\b|$)`, 'i').test(text),
+  };
+}
+
 function toolsFor(cfg, player, prompt = null) {
-  if (!cfg.powersEnabled || !isTester(cfg, player)) return [];
+  const selfAllowed = isTester(cfg, player);
+  const crossAllowed = isController(cfg, player);
+  if (!cfg.powersEnabled || (!selfAllowed && !crossAllowed)) return [];
   const intent = powerIntent(prompt);
+  const crossIntent = crossPowerIntent(prompt);
   const tools = [];
   const add = (name, description, properties = {}, required = []) =>
     tools.push({
@@ -103,23 +162,24 @@ function toolsFor(cfg, player, prompt = null) {
         parameters: { type: 'object', properties, required, additionalProperties: false },
       },
     });
-  if (cfg.powerFlags.heal && intent.heal) add('heal_self', 'Restore the requesting player to full health.');
-  if (cfg.powerFlags.feed && intent.feed)
+  if (selfAllowed && cfg.powerFlags.heal && intent.heal)
+    add('heal_self', 'Restore the requesting player to full health.');
+  if (selfAllowed && cfg.powerFlags.feed && intent.feed)
     add('feed_self', 'Restore the requesting player to full hunger and saturation.');
-  if (cfg.powerFlags.spawn && intent.spawn)
+  if (selfAllowed && cfg.powerFlags.spawn && intent.spawn)
     add('teleport_self_to_spawn', 'Safely teleport the requesting player to world spawn.');
-  if (cfg.powerFlags.time && intent.time)
+  if (selfAllowed && cfg.powerFlags.time && intent.time)
     add(
       'set_time',
       'Set this server world time.',
       { value: { type: 'string', enum: ['day', 'noon', 'night', 'midnight'] } },
       ['value']
     );
-  if (cfg.powerFlags.weather && intent.weather)
+  if (selfAllowed && cfg.powerFlags.weather && intent.weather)
     add('set_weather', 'Set this server weather.', { value: { type: 'string', enum: ['clear', 'rain', 'thunder'] } }, [
       'value',
     ]);
-  if (cfg.powerFlags.gift && intent.gift && cfg.giftItems.length)
+  if (selfAllowed && cfg.powerFlags.gift && intent.gift && cfg.giftItems.length)
     add(
       'give_self',
       'Give an allowlisted item to the requesting player.',
@@ -128,6 +188,34 @@ function toolsFor(cfg, player, prompt = null) {
         count: { type: 'integer', minimum: 1, maximum: cfg.giftMaxCount },
       },
       ['item', 'count']
+    );
+  const target = {
+    type: 'string',
+    pattern: '^[.*]?[A-Za-z0-9_]{1,16}$',
+    description: 'Exact online Minecraft player name without an @ prefix or selector.',
+  };
+  if (crossAllowed && cfg.powerFlags.heal && crossIntent.heal)
+    add('heal_player', 'Restore another exact online player to full health.', { target }, ['target']);
+  if (crossAllowed && cfg.powerFlags.feed && crossIntent.feed)
+    add('feed_player', 'Restore another exact online player to full hunger and saturation.', { target }, ['target']);
+  if (crossAllowed && cfg.powerFlags.spawn && crossIntent.teleportToSelf)
+    add('teleport_player_to_self', 'Teleport another exact online player to the requesting player.', { target }, [
+      'target',
+    ]);
+  if (crossAllowed && cfg.powerFlags.spawn && crossIntent.teleportSelfToPlayer)
+    add('teleport_self_to_player', 'Teleport the requesting player to another exact online player.', { target }, [
+      'target',
+    ]);
+  if (crossAllowed && cfg.powerFlags.gift && crossIntent.gift && cfg.giftItems.length)
+    add(
+      'give_player',
+      'Give an allowlisted item to another exact online player.',
+      {
+        target,
+        item: { type: 'string', enum: cfg.giftItems },
+        count: { type: 'integer', minimum: 1, maximum: cfg.giftMaxCount },
+      },
+      ['target', 'item', 'count']
     );
   return tools;
 }
@@ -181,17 +269,44 @@ function parseToolCall(message, cfg, player, prompt = null) {
       throw httpError(400, 'The Wizard requested an item or quantity outside the allowlist');
     }
     args = { item, count };
+  } else if (['heal_player', 'feed_player', 'teleport_player_to_self', 'teleport_self_to_player'].includes(name)) {
+    const target = normalizePowerTarget(args.target);
+    if (keys.length !== 1 || keys[0] !== 'target' || target.toLowerCase() === String(player).toLowerCase()) {
+      throw httpError(400, 'A cross-player power requires exactly one other player target');
+    }
+    args = { target };
+  } else if (name === 'give_player') {
+    const target = normalizePowerTarget(args.target);
+    const item = String(args.item || '').toLowerCase();
+    const count = Number(args.count);
+    if (
+      keys.some((key) => !['target', 'item', 'count'].includes(key)) ||
+      keys.length !== 3 ||
+      target.toLowerCase() === String(player).toLowerCase() ||
+      !cfg.giftItems.includes(item) ||
+      !Number.isInteger(count) ||
+      count < 1 ||
+      count > cfg.giftMaxCount
+    ) {
+      throw httpError(400, 'The Wizard requested a target, item, or quantity outside the allowlist');
+    }
+    args = { target, item, count };
   }
   return { id: String(call.id || ''), name, args };
 }
 
-function describe(request) {
+function describe(request, caller = 'the caller') {
   if (request.name === 'heal_self') return 'restore full health';
   if (request.name === 'feed_self') return 'restore full hunger';
   if (request.name === 'teleport_self_to_spawn') return 'teleport to world spawn';
   if (request.name === 'set_time') return `set the time to ${request.args.value}`;
   if (request.name === 'set_weather') return `set the weather to ${request.args.value}`;
-  return `give ${request.args.count} × ${request.args.item}`;
+  if (request.name === 'give_self') return `give ${request.args.count} × ${request.args.item}`;
+  if (request.name === 'heal_player') return `restore ${request.args.target}'s full health`;
+  if (request.name === 'feed_player') return `restore ${request.args.target}'s full hunger`;
+  if (request.name === 'teleport_player_to_self') return `teleport ${request.args.target} to ${caller}`;
+  if (request.name === 'teleport_self_to_player') return `teleport ${caller} to ${request.args.target}`;
+  return `give ${request.args.target} ${request.args.count} × ${request.args.item}`;
 }
 
 function recordRejection(serverId, player, reason, request = null) {
@@ -202,6 +317,8 @@ function recordRejection(serverId, player, reason, request = null) {
     summary: `${player}: Wizard power rejected`,
     details: {
       player,
+      caller: player,
+      target: request?.args?.target || null,
       power: request?.name || null,
       arguments: request?.args || null,
       succeeded: false,
@@ -244,7 +361,7 @@ async function worldSpawn(serverId) {
 }
 
 async function execute(serverId, player, request, cfg) {
-  if (!cfg.powersEnabled || !isTester(cfg, player))
+  if (!cfg.powersEnabled || (!isTester(cfg, player) && !isController(cfg, player)))
     throw httpError(403, 'This player is not allowed to use Wizard powers');
   if (!PLAYER_NAME_RE.test(String(player))) throw httpError(400, 'Invalid Minecraft player name');
   try {
@@ -265,8 +382,15 @@ async function execute(serverId, player, request, cfg) {
     throw err;
   }
 
-  const action = describe(request);
-  const details = { player, power: request.name, arguments: request.args, dryRun: cfg.powersDryRun };
+  let action = describe(request, player);
+  let details = {
+    player,
+    caller: player,
+    target: request.args.target || player,
+    power: request.name,
+    arguments: request.args,
+    dryRun: cfg.powersDryRun,
+  };
   if (cfg.powersDryRun) {
     recordEvent({
       serverId,
@@ -280,6 +404,14 @@ async function execute(serverId, player, request, cfg) {
 
   try {
     const actor = `wizard:${player}`;
+    if (request.args.target) {
+      request.args.target = matchOnlineTarget(
+        request.args.target,
+        await players.listOnlineNames(serverId, { throwOnError: true })
+      );
+      action = describe(request, player);
+      details = { ...details, target: request.args.target, arguments: request.args };
+    }
     if (request.name === 'heal_self') {
       await fixedRcon(serverId, ['effect', 'give', player, 'minecraft:instant_health', '1', '10', 'true'], player);
     } else if (request.name === 'feed_self')
@@ -295,6 +427,24 @@ async function execute(serverId, player, request, cfg) {
       await worldControls.runQuick(serverId, `weather-${request.args.value}`, { actor });
     else if (request.name === 'give_self')
       await inventory.giveItem(serverId, player, request.args.item, request.args.count, { actor });
+    else if (request.name === 'heal_player')
+      await fixedRcon(
+        serverId,
+        ['effect', 'give', request.args.target, 'minecraft:instant_health', '1', '10', 'true'],
+        request.args.target
+      );
+    else if (request.name === 'feed_player')
+      await fixedRcon(
+        serverId,
+        ['effect', 'give', request.args.target, 'minecraft:saturation', '1', '10', 'true'],
+        request.args.target
+      );
+    else if (request.name === 'teleport_player_to_self')
+      await players.tpToPlayer(serverId, request.args.target, player, { running: true, actor });
+    else if (request.name === 'teleport_self_to_player')
+      await players.tpToPlayer(serverId, player, request.args.target, { running: true, actor });
+    else if (request.name === 'give_player')
+      await inventory.giveItem(serverId, request.args.target, request.args.item, request.args.count, { actor });
     cooldowns.set(key, Date.now());
     recordEvent({
       serverId,
@@ -325,10 +475,15 @@ module.exports = {
   DEFAULT_FLAGS,
   DEFAULT_GIFTS,
   normalizeTesters,
+  normalizeControllers,
   normalizeGiftItems,
   normalizeFlags,
   isTester,
+  isController,
+  normalizePowerTarget,
+  matchOnlineTarget,
   powerIntent,
+  crossPowerIntent,
   toolsFor,
   parseToolCall,
   describe,

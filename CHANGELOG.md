@@ -5,6 +5,26 @@ All notable changes to this project are documented here. The format is based on
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Each push is cut as a new release with
 its own dated entry.
 
+## [0.14.0] - 2026-08-28
+
+### Added
+
+- Admins can configure a separate per-server Power controllers allowlist. Controllers may ask the
+  Wizard to teleport another player to themselves, teleport themselves to another player, heal or
+  feed another player, and give another player an allowlisted item. The controller list is empty
+  after upgrade, so existing testers remain self-only until an admin explicitly opts in.
+- Cross-player requests expose only the one structured tool matching the requested direction or
+  action. Human-style names such as `@PlayerA` are accepted, while the generated tool argument is a
+  plain exact player name.
+
+### Security
+
+- Cross-player targets must be valid Minecraft names, must differ from the caller, and are resolved
+  case-insensitively against the server's live RCON player list immediately before execution.
+  Selectors such as `@a`, `@e`, and `@p` are rejected; the model still has no raw RCON access.
+- Existing power flags, gift item/quantity allowlists, dry-run mode, per-caller cooldowns, and power
+  audit events apply to cross-player actions. Audits now record both caller and target explicitly.
+
 ## [0.13.0] - 2026-08-28
 
 ### Added

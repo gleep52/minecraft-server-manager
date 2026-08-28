@@ -96,6 +96,7 @@ function getConfig(serverId, { includeSecret = false } = {}) {
     powersEnabled: Boolean(r && r.powers_enabled),
     powersDryRun: r ? Boolean(r.powers_dry_run) : true,
     powerTesters: wizardPowers.normalizeTesters(parseJson(r?.power_testers_json || '[]', [])),
+    powerControllers: wizardPowers.normalizeControllers(parseJson(r?.power_controllers_json || '[]', [])),
     powerFlags: wizardPowers.normalizeFlags(parseJson(r?.power_flags_json || '{}', {})),
     giftItems: wizardPowers.normalizeGiftItems(
       parseJson(r?.gift_items_json || JSON.stringify(wizardPowers.DEFAULT_GIFTS), wizardPowers.DEFAULT_GIFTS)
@@ -157,6 +158,7 @@ function saveConfig(serverId, input, _options = {}) {
     throw httpError(400, 'Wizard conversation mode must be between 0 and 60 minutes');
   }
   const powerTesters = wizardPowers.normalizeTesters(input.powerTesters ?? priorCfg.powerTesters);
+  const powerControllers = wizardPowers.normalizeControllers(input.powerControllers ?? priorCfg.powerControllers);
   const powerFlags = wizardPowers.normalizeFlags(input.powerFlags ?? priorCfg.powerFlags);
   const giftItems = wizardPowers.normalizeGiftItems(input.giftItems ?? priorCfg.giftItems);
   const giftMaxCount = Math.trunc(Number(input.giftMaxCount ?? priorCfg.giftMaxCount));
@@ -172,9 +174,9 @@ function saveConfig(serverId, input, _options = {}) {
     `INSERT INTO wizard_configs
        (server_id, enabled, base_url, model, api_key_cipher, system_prompt, retention_days, invocation_name,
         powers_enabled, powers_dry_run, power_testers_json, power_flags_json, gift_items_json,
-        gift_max_count, power_cooldown_sec, welcome_enabled, welcome_message, checkin_minutes,
-        checkin_message, conversation_minutes, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        gift_max_count, power_cooldown_sec, power_controllers_json, welcome_enabled, welcome_message,
+        checkin_minutes, checkin_message, conversation_minutes, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
      ON CONFLICT(server_id) DO UPDATE SET
        enabled = excluded.enabled, base_url = excluded.base_url, model = excluded.model,
        api_key_cipher = excluded.api_key_cipher, system_prompt = excluded.system_prompt,
@@ -183,6 +185,7 @@ function saveConfig(serverId, input, _options = {}) {
        power_testers_json = excluded.power_testers_json, power_flags_json = excluded.power_flags_json,
        gift_items_json = excluded.gift_items_json, gift_max_count = excluded.gift_max_count,
        power_cooldown_sec = excluded.power_cooldown_sec,
+       power_controllers_json = excluded.power_controllers_json,
        welcome_enabled = excluded.welcome_enabled, welcome_message = excluded.welcome_message,
        checkin_minutes = excluded.checkin_minutes, checkin_message = excluded.checkin_message,
        conversation_minutes = excluded.conversation_minutes,
@@ -202,6 +205,7 @@ function saveConfig(serverId, input, _options = {}) {
     JSON.stringify(giftItems),
     giftMaxCount,
     powerCooldownSec,
+    JSON.stringify(powerControllers),
     welcomeEnabled ? 1 : 0,
     welcomeMessage,
     checkinMinutes,

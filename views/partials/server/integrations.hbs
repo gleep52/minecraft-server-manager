@@ -98,15 +98,20 @@
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h4 class="font-semibold">Wizard powers <span class="text-xs font-normal text-warn">Experimental</span></h4>
-          <p class="help">Only the named Minecraft testers can use enabled powers. Everyone else remains conversation-only.</p>
+          <p class="help">Testers receive self/world powers. Controllers receive separately validated powers that may affect another online player. Everyone else remains conversation-only.</p>
         </div>
         <label class="flex items-center gap-2 text-sm"><span>Enable powers</span><span class="msm-toggle"><input type="checkbox" id="ig-wz-powers-enabled" {{#if integrations.wizard.powersEnabled}}checked{{/if}}><span></span></span></label>
       </div>
-      <div class="mt-4 grid gap-4 lg:grid-cols-3">
+      <div class="mt-4 grid gap-4 lg:grid-cols-4">
         <div>
           <label class="label" for="ig-wz-testers">Minecraft testers</label>
           <textarea class="input min-h-28 font-mono text-xs" id="ig-wz-testers" placeholder="Gleep52&#10;PlayerA">{{{joinLines integrations.wizard.powerTesters}}}</textarea>
           <p class="help">One exact player name per line. Maximum 50.</p>
+        </div>
+        <div>
+          <label class="label" for="ig-wz-controllers">Power controllers</label>
+          <textarea class="input min-h-28 font-mono text-xs" id="ig-wz-controllers" placeholder="Gleep52">{{{joinLines integrations.wizard.powerControllers}}}</textarea>
+          <p class="help">Only these exact players may affect another online player. Add them to Minecraft testers too if they should retain self/world powers.</p>
         </div>
         <div>
           <label class="label" for="ig-wz-gifts">Allowed gifts</label>
@@ -120,9 +125,9 @@
         </div>
       </div>
       <div class="mt-4 grid grid-cols-2 gap-2 text-sm sm:grid-cols-3 lg:grid-cols-6">
-        <label class="flex items-center gap-2"><input class="msm-check" type="checkbox" data-wz-power="heal" {{#if integrations.wizard.powerFlags.heal}}checked{{/if}}> Heal self</label>
-        <label class="flex items-center gap-2"><input class="msm-check" type="checkbox" data-wz-power="feed" {{#if integrations.wizard.powerFlags.feed}}checked{{/if}}> Feed self</label>
-        <label class="flex items-center gap-2"><input class="msm-check" type="checkbox" data-wz-power="spawn" {{#if integrations.wizard.powerFlags.spawn}}checked{{/if}}> Spawn</label>
+        <label class="flex items-center gap-2"><input class="msm-check" type="checkbox" data-wz-power="heal" {{#if integrations.wizard.powerFlags.heal}}checked{{/if}}> Healing</label>
+        <label class="flex items-center gap-2"><input class="msm-check" type="checkbox" data-wz-power="feed" {{#if integrations.wizard.powerFlags.feed}}checked{{/if}}> Feeding</label>
+        <label class="flex items-center gap-2"><input class="msm-check" type="checkbox" data-wz-power="spawn" {{#if integrations.wizard.powerFlags.spawn}}checked{{/if}}> Teleports</label>
         <label class="flex items-center gap-2"><input class="msm-check" type="checkbox" data-wz-power="time" {{#if integrations.wizard.powerFlags.time}}checked{{/if}}> Time</label>
         <label class="flex items-center gap-2"><input class="msm-check" type="checkbox" data-wz-power="weather" {{#if integrations.wizard.powerFlags.weather}}checked{{/if}}> Weather</label>
         <label class="flex items-center gap-2"><input class="msm-check" type="checkbox" data-wz-power="gift" {{#if integrations.wizard.powerFlags.gift}}checked{{/if}}> Gifts</label>
