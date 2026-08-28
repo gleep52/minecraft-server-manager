@@ -32,6 +32,13 @@ function init() {
     document.getElementById('ig-wz-key-clear'),
     document.getElementById('ig-wz-retention'),
     document.getElementById('ig-wz-prompt'),
+    document.getElementById('ig-wz-powers-enabled'),
+    document.getElementById('ig-wz-dry-run'),
+    document.getElementById('ig-wz-testers'),
+    document.getElementById('ig-wz-gifts'),
+    document.getElementById('ig-wz-gift-max'),
+    document.getElementById('ig-wz-power-cooldown'),
+    ...root.querySelectorAll('[data-wz-power]'),
   ]);
 
   function wizardConnection() {
@@ -40,6 +47,13 @@ function init() {
       model: document.getElementById('ig-wz-model')?.value.trim() || '',
       apiKey: document.getElementById('ig-wz-key')?.value || undefined,
     };
+  }
+
+  function lineList(id) {
+    return (document.getElementById(id)?.value || '')
+      .split(/[\n,]+/)
+      .map((value) => value.trim())
+      .filter(Boolean);
   }
 
   document.getElementById('ig-wz-models-load')?.addEventListener('click', async (e) => {
@@ -82,6 +96,15 @@ function init() {
       clearApiKey: Boolean(document.getElementById('ig-wz-key-clear')?.checked),
       retentionDays: Number(document.getElementById('ig-wz-retention').value),
       systemPrompt: document.getElementById('ig-wz-prompt').value,
+      powersEnabled: document.getElementById('ig-wz-powers-enabled').checked,
+      powersDryRun: document.getElementById('ig-wz-dry-run').checked,
+      powerTesters: lineList('ig-wz-testers'),
+      giftItems: lineList('ig-wz-gifts'),
+      giftMaxCount: Number(document.getElementById('ig-wz-gift-max').value),
+      powerCooldownSec: Number(document.getElementById('ig-wz-power-cooldown').value),
+      powerFlags: Object.fromEntries(
+        [...root.querySelectorAll('[data-wz-power]')].map((box) => [box.dataset.wzPower, box.checked])
+      ),
     };
     await withBusy(btn, 'Saving…', async () => {
       const res = await api(`/api/servers/${serverId}/wizard`, 'POST', body);
@@ -117,6 +140,30 @@ function init() {
         list.appendChild(line);
       }
       if (!res.data.transcripts.length) list.textContent = 'No retained wizard conversations for this server.';
+      list.classList.remove('hidden');
+    });
+  });
+
+  document.getElementById('ig-wz-power-audit')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    await withBusy(btn, 'Loading…', async () => {
+      const res = await api(`/api/servers/${serverId}/wizard/powers/audit?limit=100`, 'GET');
+      if (!res.ok) return;
+      const list = document.getElementById('ig-wz-power-audit-list');
+      list.replaceChildren();
+      for (const event of res.data.events) {
+        const line = document.createElement('div');
+        line.className = 'border-b border-line py-2 last:border-0';
+        const meta = document.createElement('div');
+        meta.className = 'mb-1 text-ink-faint';
+        meta.textContent = `${event.created_at} · ${event.actor}`;
+        const summary = document.createElement('div');
+        summary.className = 'text-ink-soft';
+        summary.textContent = event.summary;
+        line.append(meta, summary);
+        list.appendChild(line);
+      }
+      if (!res.data.events.length) list.textContent = 'No Wizard power attempts have been recorded for this server.';
       list.classList.remove('hidden');
     });
   });

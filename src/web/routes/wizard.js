@@ -9,6 +9,7 @@ const asyncHandler = require('../middleware/asyncHandler');
 const { makeJsonErrorHandler } = require('../middleware/jsonErrorHandler');
 const servers = require('../../services/servers');
 const wizard = require('../../services/wizard');
+const wizardPowers = require('../../services/wizardPowers');
 
 const router = express.Router({ mergeParams: true });
 
@@ -50,6 +51,22 @@ router.post(
         clearApiKey: z.boolean().optional(),
         systemPrompt: z.string().max(12000),
         retentionDays: z.coerce.number().int().min(0).max(3650),
+        powersEnabled: z.boolean().optional(),
+        powersDryRun: z.boolean().optional(),
+        powerTesters: z.array(z.string().trim().min(1).max(32)).max(50).optional(),
+        powerFlags: z
+          .object({
+            heal: z.boolean(),
+            feed: z.boolean(),
+            spawn: z.boolean(),
+            time: z.boolean(),
+            weather: z.boolean(),
+            gift: z.boolean(),
+          })
+          .optional(),
+        giftItems: z.array(z.string().trim().min(1).max(200)).max(100).optional(),
+        giftMaxCount: z.coerce.number().int().min(1).max(16).optional(),
+        powerCooldownSec: z.coerce.number().int().min(3).max(3600).optional(),
       })
       .parse(req.body);
     res.json({
@@ -104,6 +121,12 @@ router.delete('/transcripts', (req, res) => {
   const server = mustGet(req);
   const result = wizard.clearTranscripts(server.id);
   res.json({ ok: true, deleted: Number(result.changes) || 0 });
+});
+
+router.get('/powers/audit', (req, res) => {
+  const server = mustGet(req);
+  const limit = z.coerce.number().int().min(1).max(500).default(100).parse(req.query.limit);
+  res.json({ ok: true, events: wizardPowers.listAudit(server.id, limit) });
 });
 
 router.use(makeJsonErrorHandler('wizard'));

@@ -5,6 +5,25 @@ All notable changes to this project are documented here. The format is based on
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Each push is cut as a new release with
 its own dated entry.
 
+## [0.11.0] - 2026-08-28
+
+### Added
+
+- Added opt-in, per-server Wizard powers for healing, feeding, safe teleport-to-spawn, time,
+  weather, and allowlisted item gifts. Admins control every power, exact Minecraft tester names,
+  gift IDs, a hard-capped quantity, per-player cooldown, and a dry-run mode that starts enabled.
+- Added an admin-only power audit beside the transcript viewer. Every dry run, successful action,
+  failure, cooldown rejection, and invalid model tool request is retained in the panel event log.
+
+### Security
+
+- Models receive only fixed OpenAI-compatible function schemas with no player target, selector,
+  RCON, or raw-command parameter. The executor revalidates the caller, enabled power, item
+  allowlist, and quantity before using existing bounded services; unsupported models automatically
+  fall back to conversation-only chat.
+- Powers are disabled by default during upgrades and can affect only exact, admin-allowlisted
+  Minecraft usernames. No operator or viewer can see or change power configuration or audits.
+
 ## [0.10.1] - 2026-08-28
 
 ### Added

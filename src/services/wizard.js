@@ -6,6 +6,7 @@ const dns = require('node:dns').promises;
 const db = require('../db');
 const secrets = require('./secrets');
 const chat = require('./chat');
+const wizardPowers = require('./wizardPowers');
 const httpError = require('../utils/httpError');
 const { PLAYER_NAME_RE } = require('../utils/playerName');
 
@@ -13,7 +14,7 @@ const DEFAULT_PROMPT =
   'You are an ancient, playful wizard who lives inside this Minecraft world. ' +
   'Address players by name when natural. Keep every response under 350 characters. ' +
   'You may converse, tell stories, tease gently, and offer Minecraft advice. ' +
-  'You cannot perform gameplay actions yet, so never claim that you gave an item, teleported someone, or changed the world.';
+  'Never claim that you performed a gameplay action unless an available tool completed successfully.';
 const INVOCATION_NAME_RE = /^[A-Za-z][A-Za-z0-9_-]{0,31}$/;
 const MAX_REPLY = 400;
 const HISTORY_MESSAGES = 20;
@@ -48,6 +49,15 @@ function row(serverId) {
   return db.get('SELECT * FROM wizard_configs WHERE server_id = ?', serverId);
 }
 
+function parseJson(raw, fallback) {
+  try {
+    const value = JSON.parse(raw);
+    return value === null ? fallback : value;
+  } catch {
+    return fallback;
+  }
+}
+
 function getConfig(serverId, { includeSecret = false } = {}) {
   const r = row(serverId);
   const key = r && r.api_key_cipher ? secrets.tryDecrypt(r.api_key_cipher) : null;
@@ -59,6 +69,15 @@ function getConfig(serverId, { includeSecret = false } = {}) {
     systemPrompt: (r && r.system_prompt) || DEFAULT_PROMPT,
     retentionDays: r ? r.retention_days : 7,
     hasApiKey: Boolean(key),
+    powersEnabled: Boolean(r && r.powers_enabled),
+    powersDryRun: r ? Boolean(r.powers_dry_run) : true,
+    powerTesters: wizardPowers.normalizeTesters(parseJson(r?.power_testers_json || '[]', [])),
+    powerFlags: wizardPowers.normalizeFlags(parseJson(r?.power_flags_json || '{}', {})),
+    giftItems: wizardPowers.normalizeGiftItems(
+      parseJson(r?.gift_items_json || JSON.stringify(wizardPowers.DEFAULT_GIFTS), wizardPowers.DEFAULT_GIFTS)
+    ),
+    giftMaxCount: r ? r.gift_max_count : 16,
+    powerCooldownSec: r ? r.power_cooldown_sec : 30,
     ...(includeSecret ? { apiKey: key || '' } : {}),
   };
 }
@@ -101,17 +120,33 @@ function saveConfig(serverId, input, _options = {}) {
   if (input.enabled && !model) throw httpError(400, 'Choose or enter a model before enabling the wizard');
   const retentionDays = Math.max(0, Math.min(3650, Math.trunc(Number(input.retentionDays))));
   const prompt = String(input.systemPrompt || '').trim() || DEFAULT_PROMPT;
+  const priorCfg = getConfig(serverId);
+  const powerTesters = wizardPowers.normalizeTesters(input.powerTesters ?? priorCfg.powerTesters);
+  const powerFlags = wizardPowers.normalizeFlags(input.powerFlags ?? priorCfg.powerFlags);
+  const giftItems = wizardPowers.normalizeGiftItems(input.giftItems ?? priorCfg.giftItems);
+  const giftMaxCount = Math.trunc(Number(input.giftMaxCount ?? priorCfg.giftMaxCount));
+  const powerCooldownSec = Math.trunc(Number(input.powerCooldownSec ?? priorCfg.powerCooldownSec));
+  if (giftMaxCount < 1 || giftMaxCount > 16) throw httpError(400, 'Maximum gift quantity must be between 1 and 16');
+  if (powerCooldownSec < 3 || powerCooldownSec > 3600) {
+    throw httpError(400, 'Power cooldown must be between 3 and 3600 seconds');
+  }
   let cipher = previous ? previous.api_key_cipher : null;
   if (input.clearApiKey) cipher = null;
   else if (typeof input.apiKey === 'string' && input.apiKey.trim()) cipher = secrets.encrypt(input.apiKey.trim());
   db.run(
     `INSERT INTO wizard_configs
-       (server_id, enabled, base_url, model, api_key_cipher, system_prompt, retention_days, invocation_name, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+       (server_id, enabled, base_url, model, api_key_cipher, system_prompt, retention_days, invocation_name,
+        powers_enabled, powers_dry_run, power_testers_json, power_flags_json, gift_items_json,
+        gift_max_count, power_cooldown_sec, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
      ON CONFLICT(server_id) DO UPDATE SET
        enabled = excluded.enabled, base_url = excluded.base_url, model = excluded.model,
        api_key_cipher = excluded.api_key_cipher, system_prompt = excluded.system_prompt,
        retention_days = excluded.retention_days, invocation_name = excluded.invocation_name,
+       powers_enabled = excluded.powers_enabled, powers_dry_run = excluded.powers_dry_run,
+       power_testers_json = excluded.power_testers_json, power_flags_json = excluded.power_flags_json,
+       gift_items_json = excluded.gift_items_json, gift_max_count = excluded.gift_max_count,
+       power_cooldown_sec = excluded.power_cooldown_sec,
        updated_at = datetime('now')`,
     serverId,
     input.enabled ? 1 : 0,
@@ -120,7 +155,14 @@ function saveConfig(serverId, input, _options = {}) {
     cipher,
     prompt,
     retentionDays,
-    invocationName
+    invocationName,
+    (input.powersEnabled ?? priorCfg.powersEnabled) ? 1 : 0,
+    (input.powersDryRun ?? priorCfg.powersDryRun) ? 1 : 0,
+    JSON.stringify(powerTesters),
+    JSON.stringify(powerFlags),
+    JSON.stringify(giftItems),
+    giftMaxCount,
+    powerCooldownSec
   );
   pruneTranscripts(serverId);
   return getConfig(serverId);
@@ -189,31 +231,68 @@ async function listModels(serverId, override = {}) {
   return [...new Set((body?.models || []).map((m) => m.name || m.model).filter(Boolean))].sort();
 }
 
-async function complete(serverId, player, prompt, { persist = true, override = {} } = {}) {
+async function completionMessage(
+  serverId,
+  player,
+  prompt,
+  { persist = true, override = {}, allowPowers = false } = {}
+) {
   const cfg = { ...getConfig(serverId, { includeSecret: true }), ...override };
   if (!cfg.model) throw httpError(409, 'The wizard has no model configured');
   const history = persist && cfg.retentionDays > 0 ? recentConversation(serverId, player) : [];
-  const body = await fetchJson(`${openAiBase(normalizeBaseUrl(cfg.baseUrl))}/chat/completions`, {
+  const tools = allowPowers ? wizardPowers.toolsFor(cfg, player) : [];
+  const powerGuard = tools.length
+    ? 'You have only the provided tools. A tool always affects the requesting player when named self. Never claim an action happened unless you call a tool.'
+    : 'No gameplay tools are available for this player. Continue conversationally and never claim that you changed the game.';
+  const request = {
+    model: cfg.model,
+    temperature: 0.8,
+    max_tokens: 180,
+    stream: false,
+    messages: [
+      { role: 'system', content: `${cfg.systemPrompt}\n\nSecurity rule: ${powerGuard}` },
+      ...history.map((m) => ({ role: m.role, content: m.role === 'user' ? `${m.player}: ${m.content}` : m.content })),
+      { role: 'user', content: `${player}: ${prompt}` },
+    ],
+  };
+  if (tools.length) {
+    request.tools = tools;
+    request.tool_choice = 'auto';
+  }
+  const url = `${openAiBase(normalizeBaseUrl(cfg.baseUrl))}/chat/completions`;
+  const options = {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...authHeaders(cfg) },
-    body: JSON.stringify({
-      model: cfg.model,
-      temperature: 0.8,
-      max_tokens: 180,
-      stream: false,
-      messages: [
-        { role: 'system', content: cfg.systemPrompt },
-        ...history.map((m) => ({ role: m.role, content: m.role === 'user' ? `${m.player}: ${m.content}` : m.content })),
-        { role: 'user', content: `${player}: ${prompt}` },
-      ],
-    }),
-  });
-  const raw = body?.choices?.[0]?.message?.content;
+    body: JSON.stringify(request),
+  };
+  let body;
+  try {
+    body = await fetchJson(url, options);
+  } catch (err) {
+    // Older local models may support chat completions but not OpenAI tools.
+    // Retry without tools so they remain safely conversation-only.
+    if (!tools.length) throw err;
+    delete request.tools;
+    delete request.tool_choice;
+    request.messages[0].content = `${cfg.systemPrompt}\n\nSecurity rule: No gameplay tools are available for this player. Continue conversationally and never claim that you changed the game.`;
+    body = await fetchJson(url, { ...options, body: JSON.stringify(request) });
+  }
+  const message = body?.choices?.[0]?.message;
+  if (!message || typeof message !== 'object') throw httpError(502, 'The LLM returned an empty response');
+  return { message, cfg };
+}
+
+function cleanReply(raw) {
   if (typeof raw !== 'string' || !raw.trim()) throw httpError(502, 'The LLM returned an empty response');
   return raw
     .replace(/[\r\n\x00-\x1f\x7f]+/g, ' ')
     .trim()
     .slice(0, MAX_REPLY);
+}
+
+async function complete(serverId, player, prompt, options = {}) {
+  const { message } = await completionMessage(serverId, player, prompt, options);
+  return cleanReply(message.content);
 }
 
 async function testConnection(serverId, override) {
@@ -314,7 +393,16 @@ async function handleChat(serverId, player, message) {
   cooldowns.set(key, Date.now());
   let exchangeRecorded = false;
   try {
-    const reply = await complete(serverId, player, prompt);
+    const { message, cfg: powerCfg } = await completionMessage(serverId, player, prompt, { allowPowers: true });
+    let powerRequest;
+    try {
+      powerRequest = wizardPowers.parseToolCall(message, powerCfg, player);
+    } catch (err) {
+      wizardPowers.recordRejection(serverId, player, err.message);
+      throw err;
+    }
+    const result = powerRequest ? await wizardPowers.execute(serverId, player, powerRequest, powerCfg) : null;
+    const reply = result ? result.message : cleanReply(message.content);
     insertTranscript(serverId, player, 'user', prompt);
     insertTranscript(serverId, player, 'assistant', reply);
     exchangeRecorded = true;
@@ -364,4 +452,5 @@ module.exports = {
   clearTranscripts,
   pruneTranscripts,
   normalizeBaseUrl,
+  completionMessage,
 };

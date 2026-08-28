@@ -7,6 +7,7 @@ const app = require('./helpers/app');
 const db = require('../src/db');
 const auth = require('../src/services/auth');
 const wizard = require('../src/services/wizard');
+const wizardPowers = require('../src/services/wizardPowers');
 
 let adminCookie;
 let operatorCookie;
@@ -35,6 +36,7 @@ test('wizard configuration and transcripts are admin-only', async () => {
   for (const cookie of [viewerCookie, operatorCookie]) {
     assert.equal((await app.req('GET', `/api/servers/${serverId}/wizard`, { cookie })).status, 403);
     assert.equal((await app.req('GET', `/api/servers/${serverId}/wizard/transcripts`, { cookie })).status, 403);
+    assert.equal((await app.req('GET', `/api/servers/${serverId}/wizard/powers/audit`, { cookie })).status, 403);
     assert.equal((await app.req('GET', '/wizard-transcripts', { cookie })).status, 403);
   }
   assert.equal((await app.req('GET', `/api/servers/${serverId}/wizard`, { cookie: adminCookie })).status, 200);
@@ -50,6 +52,8 @@ test('per-server config encrypts the API key and defaults retention to seven day
   const initial = await app.req('GET', `/api/servers/${serverId}/wizard`, { cookie: adminCookie });
   assert.equal(initial.json.wizard.retentionDays, 7);
   assert.equal(initial.json.wizard.invocationName, 'wizard');
+  assert.equal(initial.json.wizard.powersEnabled, false);
+  assert.equal(initial.json.wizard.powersDryRun, true);
 
   const saved = await app.req('POST', `/api/servers/${serverId}/wizard`, {
     cookie: adminCookie,
@@ -70,6 +74,131 @@ test('per-server config encrypts the API key and defaults retention to seven day
   assert.notEqual(stored.api_key_cipher, 'not-plaintext-in-db');
   assert.equal(stored.invocation_name, 'bubba');
   assert.equal(wizard.getConfig(serverId, { includeSecret: true }).apiKey, 'not-plaintext-in-db');
+});
+
+test('power configuration is per-server, bounded, and admin-only', async () => {
+  const saved = await app.req('POST', `/api/servers/${serverId}/wizard`, {
+    cookie: adminCookie,
+    body: {
+      enabled: true,
+      baseUrl: 'http://127.0.0.1:11434',
+      model: 'qwen:test',
+      invocationName: 'bubba',
+      systemPrompt: 'Test wizard',
+      retentionDays: 7,
+      powersEnabled: true,
+      powersDryRun: true,
+      powerTesters: ['Gleep52'],
+      powerFlags: { heal: true, feed: true, spawn: true, time: false, weather: true, gift: true },
+      giftItems: ['minecraft:bread', 'minecraft:torch'],
+      giftMaxCount: 8,
+      powerCooldownSec: 45,
+    },
+  });
+  assert.equal(saved.status, 200);
+  assert.deepEqual(saved.json.wizard.powerTesters, ['Gleep52']);
+  assert.deepEqual(saved.json.wizard.giftItems, ['minecraft:bread', 'minecraft:torch']);
+  assert.equal(saved.json.wizard.giftMaxCount, 8);
+  assert.equal(saved.json.wizard.powerFlags.time, false);
+
+  const excessive = await app.req('POST', `/api/servers/${serverId}/wizard`, {
+    cookie: adminCookie,
+    body: {
+      enabled: false,
+      baseUrl: 'http://127.0.0.1:11434',
+      model: 'qwen:test',
+      systemPrompt: 'Test',
+      retentionDays: 7,
+      giftMaxCount: 17,
+    },
+  });
+  assert.equal(excessive.status, 400);
+});
+
+test('power tools can only affect the caller and reject injected arguments', () => {
+  const cfg = wizard.getConfig(serverId);
+  const tools = wizardPowers.toolsFor(cfg, 'Gleep52');
+  assert.ok(tools.length > 0);
+  assert.equal(wizardPowers.toolsFor(cfg, 'SomeoneElse').length, 0);
+  const serialized = JSON.stringify(tools);
+  assert.doesNotMatch(serialized, /target|selector|command|rcon/i);
+
+  const gift = wizardPowers.parseToolCall(
+    {
+      tool_calls: [
+        {
+          id: 'call-1',
+          function: { name: 'give_self', arguments: '{"item":"minecraft:bread","count":2}' },
+        },
+      ],
+    },
+    cfg,
+    'Gleep52'
+  );
+  assert.deepEqual(gift.args, { item: 'minecraft:bread', count: 2 });
+  assert.throws(
+    () =>
+      wizardPowers.parseToolCall(
+        {
+          tool_calls: [
+            {
+              function: {
+                name: 'give_self',
+                arguments: '{"item":"minecraft:bread","count":2,"target":"NotTheCaller"}',
+              },
+            },
+          ],
+        },
+        cfg,
+        'Gleep52'
+      ),
+    /outside the allowlist/
+  );
+});
+
+test('eligible model requests receive only structured tools and unsupported models fall back to chat', async () => {
+  const originalFetch = global.fetch;
+  const requests = [];
+  global.fetch = async (_url, options) => {
+    const body = JSON.parse(options.body);
+    requests.push(body);
+    if (requests.length === 1) {
+      return new Response(JSON.stringify({ error: { message: 'tools are not supported' } }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    return new Response(
+      JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'Only conversation.' } }] }),
+      {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }
+    );
+  };
+  try {
+    const result = await wizard.completionMessage(serverId, 'Gleep52', 'Can you help?', { allowPowers: true });
+    assert.equal(result.message.content, 'Only conversation.');
+    assert.ok(requests[0].tools.length > 0);
+    assert.equal(Object.hasOwn(requests[1], 'tools'), false);
+    assert.match(requests[1].messages[0].content, /No gameplay tools are available/);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('dry-run powers write a complete audit event without executing RCON', async () => {
+  const cfg = wizard.getConfig(serverId);
+  await assert.rejects(
+    wizardPowers.execute(serverId, 'Gleep52', { name: 'set_time', args: { value: 'day' } }, cfg),
+    /disabled or unavailable/
+  );
+  const result = await wizardPowers.execute(serverId, 'Gleep52', { name: 'heal_self', args: {} }, cfg);
+  assert.equal(result.dryRun, true);
+  const audit = wizardPowers.listAudit(serverId, 10);
+  assert.match(audit[0].summary, /Dry run: Gleep52 would restore full health/);
+  assert.equal(audit[0].details.power, 'heal_self');
+  assert.equal(audit[0].details.dryRun, true);
 });
 
 test('model discovery supports OpenAI-compatible model lists and free-text trigger parsing', async () => {
