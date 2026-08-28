@@ -240,7 +240,7 @@ async function completionMessage(
   const cfg = { ...getConfig(serverId, { includeSecret: true }), ...override };
   if (!cfg.model) throw httpError(409, 'The wizard has no model configured');
   const history = persist && cfg.retentionDays > 0 ? recentConversation(serverId, player) : [];
-  const tools = allowPowers ? wizardPowers.toolsFor(cfg, player) : [];
+  const tools = allowPowers ? wizardPowers.toolsFor(cfg, player, prompt) : [];
   const powerGuard = tools.length
     ? 'You have only the provided tools. A tool always affects the requesting player when named self. Call at most one tool for a request. Never claim an action happened unless you call a tool.'
     : 'No gameplay tools are available for this player. Continue conversationally and never claim that you changed the game.';
@@ -434,7 +434,7 @@ async function handleChat(serverId, player, message) {
     powerAttempted = Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
     let powerRequest;
     try {
-      powerRequest = wizardPowers.parseToolCall(message, powerCfg, player);
+      powerRequest = wizardPowers.parseToolCall(message, powerCfg, player, prompt);
     } catch (err) {
       wizardPowers.recordRejection(serverId, player, err.message);
       throw err;

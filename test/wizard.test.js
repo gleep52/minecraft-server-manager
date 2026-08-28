@@ -190,6 +190,31 @@ test('power tools can only affect the caller and reject injected arguments', () 
   );
 });
 
+test('power intent requires an explicit action and keeps recipe questions conversational', () => {
+  const cfg = wizard.getConfig(serverId);
+  const names = (prompt) => wizardPowers.toolsFor(cfg, 'Gleep52', prompt).map((tool) => tool.function.name);
+  assert.deepEqual(names('how do I craft myself a fishing pole using a crafting table?'), []);
+  assert.deepEqual(names('what is the recipe for a torch?'), []);
+  assert.deepEqual(names('how do I make it rain in Minecraft?'), []);
+  assert.deepEqual(names('give me one torch please'), ['give_self']);
+  assert.deepEqual(names('can I have a light?'), ['give_self']);
+  assert.deepEqual(names('make it rain please'), ['set_weather']);
+  assert.deepEqual(names('teleport me home'), ['teleport_self_to_spawn']);
+
+  assert.throws(
+    () =>
+      wizardPowers.parseToolCall(
+        {
+          tool_calls: [{ function: { name: 'give_self', arguments: '{"item":"minecraft:torch","count":1}' } }],
+        },
+        cfg,
+        'Gleep52',
+        'how do I craft a torch?'
+      ),
+    /disabled or unavailable/
+  );
+});
+
 test('eligible model requests receive only structured tools and unsupported models fall back to chat', async () => {
   const originalFetch = global.fetch;
   const requests = [];
@@ -211,7 +236,9 @@ test('eligible model requests receive only structured tools and unsupported mode
     );
   };
   try {
-    const result = await wizard.completionMessage(serverId, 'Gleep52', 'Can you help?', { allowPowers: true });
+    const result = await wizard.completionMessage(serverId, 'Gleep52', 'Give me two pieces of bread.', {
+      allowPowers: true,
+    });
     assert.equal(result.message.content, 'Only conversation.');
     assert.ok(requests[0].tools.length > 0);
     assert.equal(Object.hasOwn(requests[1], 'tools'), false);

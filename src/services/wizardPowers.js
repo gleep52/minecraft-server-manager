@@ -62,8 +62,37 @@ function isTester(cfg, player) {
   return cfg.powerTesters.some((name) => name.toLowerCase() === wanted);
 }
 
-function toolsFor(cfg, player) {
+const INFORMATION_RE =
+  /\b(?:how (?:do|can|should|would)|recipe|craft(?:ing)?|instructions?|what (?:do|should|can)|where (?:do|can)|explain|teach me|show me how)\b/i;
+
+function powerIntent(prompt) {
+  if (prompt === null || prompt === undefined) return { ...DEFAULT_FLAGS };
+  const text = String(prompt).trim();
+  if (!text || INFORMATION_RE.test(text)) return Object.fromEntries(POWER_KEYS.map((key) => [key, false]));
+  return {
+    heal: /\b(?:heal|cure|revive)\s+me\b|\brestore\s+(?:my\s+)?health\b|\bi(?:'m| am)\s+(?:hurt|dying|low on health)\b/i.test(
+      text
+    ),
+    feed: /\b(?:feed|saturate)\s+me\b|\brestore\s+(?:my\s+)?(?:hunger|food)\b|\bi(?:'m| am)\s+(?:hungry|starving)\b/i.test(
+      text
+    ),
+    spawn: /\b(?:teleport|send|take|return|get)\s+me\s+(?:back\s+)?(?:to\s+)?(?:world\s+)?(?:spawn|home)\b/i.test(text),
+    time: /\b(?:set|change|turn|make)\s+(?:the\s+)?(?:world\s+)?(?:time|it)\s+(?:to\s+)?(?:day|daytime|noon|night|midnight)\b/i.test(
+      text
+    ),
+    weather:
+      /\b(?:make|let)\s+it\s+(?:rain|snow|thunder)\b|\b(?:set|change)\s+(?:the\s+)?weather(?:\s+to)?\s+(?:clear|rain|rainy|thunder|stormy)\b|\b(?:clear|start|stop)\s+(?:the\s+)?(?:rain|weather|storm)\b/i.test(
+        text
+      ),
+    gift: /\b(?:give|grant|hand|bring|spawn|summon)\s+(?:me|us)\b|\b(?:can|could|may|would)\s+(?:you\s+)?(?:give|grant|hand|bring|spawn)\s+me\b|\b(?:can|could|may)\s+i\s+(?:have|get|receive)\b|\bi\s+(?:want|need|would like)\s+(?:an?|some|one|two|three|\d+)\b/i.test(
+      text
+    ),
+  };
+}
+
+function toolsFor(cfg, player, prompt = null) {
   if (!cfg.powersEnabled || !isTester(cfg, player)) return [];
+  const intent = powerIntent(prompt);
   const tools = [];
   const add = (name, description, properties = {}, required = []) =>
     tools.push({
@@ -74,21 +103,23 @@ function toolsFor(cfg, player) {
         parameters: { type: 'object', properties, required, additionalProperties: false },
       },
     });
-  if (cfg.powerFlags.heal) add('heal_self', 'Restore the requesting player to full health.');
-  if (cfg.powerFlags.feed) add('feed_self', 'Restore the requesting player to full hunger and saturation.');
-  if (cfg.powerFlags.spawn) add('teleport_self_to_spawn', 'Safely teleport the requesting player to world spawn.');
-  if (cfg.powerFlags.time)
+  if (cfg.powerFlags.heal && intent.heal) add('heal_self', 'Restore the requesting player to full health.');
+  if (cfg.powerFlags.feed && intent.feed)
+    add('feed_self', 'Restore the requesting player to full hunger and saturation.');
+  if (cfg.powerFlags.spawn && intent.spawn)
+    add('teleport_self_to_spawn', 'Safely teleport the requesting player to world spawn.');
+  if (cfg.powerFlags.time && intent.time)
     add(
       'set_time',
       'Set this server world time.',
       { value: { type: 'string', enum: ['day', 'noon', 'night', 'midnight'] } },
       ['value']
     );
-  if (cfg.powerFlags.weather)
+  if (cfg.powerFlags.weather && intent.weather)
     add('set_weather', 'Set this server weather.', { value: { type: 'string', enum: ['clear', 'rain', 'thunder'] } }, [
       'value',
     ]);
-  if (cfg.powerFlags.gift && cfg.giftItems.length)
+  if (cfg.powerFlags.gift && intent.gift && cfg.giftItems.length)
     add(
       'give_self',
       'Give an allowlisted item to the requesting player.',
@@ -101,18 +132,18 @@ function toolsFor(cfg, player) {
   return tools;
 }
 
-function parseToolCall(message, cfg, player) {
+function parseToolCall(message, cfg, player, prompt = null) {
   const calls = message && Array.isArray(message.tool_calls) ? message.tool_calls : [];
   if (!calls.length) return null;
   if (calls.length > 1) {
-    const parsed = calls.map((call) => parseToolCall({ tool_calls: [call] }, cfg, player));
+    const parsed = calls.map((call) => parseToolCall({ tool_calls: [call] }, cfg, player, prompt));
     const signatures = new Set(parsed.map((request) => JSON.stringify([request.name, request.args])));
     if (signatures.size === 1) return parsed[0];
     throw httpError(400, 'The Wizard requested more than one different power at once');
   }
   const call = calls[0];
   const name = String(call?.function?.name || '');
-  const allowed = new Set(toolsFor(cfg, player).map((tool) => tool.function.name));
+  const allowed = new Set(toolsFor(cfg, player, prompt).map((tool) => tool.function.name));
   if (!allowed.has(name)) throw httpError(403, 'The Wizard requested a disabled or unavailable power');
   let args;
   try {
@@ -297,6 +328,7 @@ module.exports = {
   normalizeGiftItems,
   normalizeFlags,
   isTester,
+  powerIntent,
   toolsFor,
   parseToolCall,
   describe,

@@ -5,6 +5,16 @@ All notable changes to this project are documented here. The format is based on
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Each push is cut as a new release with
 its own dated entry.
 
+## [0.11.3] - 2026-08-28
+
+### Fixed
+
+- Wizard powers are now offered to the model only when the player's message contains a matching,
+  explicit action request. Recipe, crafting, how-to, explanation, and other informational questions
+  remain conversation-only instead of being mistaken for an item gift or another gameplay action.
+- Ambiguous requests fail safely as ordinary conversation, while direct phrases such as “give me a
+  torch,” “make it rain,” and “teleport me home” expose only the one relevant power.
+
 ## [0.11.2] - 2026-08-28
 
 ### Fixed
