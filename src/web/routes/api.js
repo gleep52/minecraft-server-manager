@@ -1048,7 +1048,7 @@ router.use('/servers/:id/chat-commands', require('./chatCommands'));
 // ---- Integrations (Discord, invites, status page) ----
 router.use('/servers/:id/integrations', require('./integrations'));
 
-// ---- Conversational wizard (configuration + transcripts are admin-only) ----
+// ---- Conversational chatbot (legacy /wizard API; configuration + transcripts are admin-only) ----
 router.use('/servers/:id/wizard', requireRoleKeys('admin'), require('./wizard'));
 
 // ---- Analytics & activity timeline ----

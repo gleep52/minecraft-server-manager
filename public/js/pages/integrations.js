@@ -124,7 +124,7 @@ function init() {
       toast(
         res.data.wizard.enabled
           ? `Chatbot enabled. Players can say @${res.data.wizard.invocationName}.`
-          : 'Wizard settings saved; chatbot is disabled.'
+          : 'Chatbot settings saved; chatbot is disabled.'
       );
       document.getElementById('ig-wz-key').value = '';
       if (document.getElementById('ig-wz-key-clear')) document.getElementById('ig-wz-key-clear').checked = false;
@@ -151,7 +151,7 @@ function init() {
         line.append(meta, content);
         list.appendChild(line);
       }
-      if (!res.data.transcripts.length) list.textContent = 'No retained wizard conversations for this server.';
+      if (!res.data.transcripts.length) list.textContent = 'No retained chatbot conversations for this server.';
       list.classList.remove('hidden');
     });
   });
@@ -175,7 +175,7 @@ function init() {
         line.append(meta, summary);
         list.appendChild(line);
       }
-      if (!res.data.events.length) list.textContent = 'No Wizard power attempts have been recorded for this server.';
+      if (!res.data.events.length) list.textContent = 'No chatbot power attempts have been recorded for this server.';
       list.classList.remove('hidden');
     });
   });

@@ -18,7 +18,7 @@ const DEFAULT_PROMPT =
   'You may converse, tell stories, tease gently, and offer Minecraft advice. ' +
   'Never claim that you performed a gameplay action unless an available tool completed successfully.';
 const DEFAULT_WELCOME_MESSAGE =
-  "Welcome, {player}! I am {wizard}, this server's resident guide and conversational companion. " +
+  "Welcome, {player}! I am {chatbot}, this server's resident guide and conversational companion. " +
   'Ask me for help—or just chat—by writing {mention} followed by your message.';
 const DEFAULT_CHECKIN_MESSAGE =
   '{player}, you have been exploring for a while. How are you doing? ' +
@@ -142,7 +142,7 @@ function saveConfig(serverId, input, _options = {}) {
   const baseUrl = normalizeBaseUrl(input.baseUrl);
   const model = String(input.model || '').trim();
   const invocationName = normalizeInvocationName(input.invocationName ?? previous?.invocation_name ?? 'wizard');
-  if (input.enabled && !model) throw httpError(400, 'Choose or enter a model before enabling the wizard');
+  if (input.enabled && !model) throw httpError(400, 'Choose or enter a model before enabling the chatbot');
   const retentionDays = Math.max(0, Math.min(3650, Math.trunc(Number(input.retentionDays))));
   const prompt = String(input.systemPrompt || '').trim() || DEFAULT_PROMPT;
   const priorCfg = getConfig(serverId);
@@ -152,10 +152,10 @@ function saveConfig(serverId, input, _options = {}) {
   const checkinMessage = normalizeOutreachMessage(input.checkinMessage, priorCfg.checkinMessage);
   const conversationMinutes = Math.trunc(Number(input.conversationMinutes ?? priorCfg.conversationMinutes));
   if (!Number.isInteger(checkinMinutes) || checkinMinutes < 0 || checkinMinutes > 1440) {
-    throw httpError(400, 'Wizard check-in time must be between 0 and 1440 minutes');
+    throw httpError(400, 'Chatbot check-in time must be between 0 and 1440 minutes');
   }
   if (!Number.isInteger(conversationMinutes) || conversationMinutes < 0 || conversationMinutes > 60) {
-    throw httpError(400, 'Wizard conversation mode must be between 0 and 60 minutes');
+    throw httpError(400, 'Chatbot conversation mode must be between 0 and 60 minutes');
   }
   const powerTesters = wizardPowers.normalizeTesters(input.powerTesters ?? priorCfg.powerTesters);
   const powerControllers = wizardPowers.normalizeControllers(input.powerControllers ?? priorCfg.powerControllers);
@@ -286,7 +286,7 @@ async function completionMessage(
   { persist = true, override = {}, allowPowers = false } = {}
 ) {
   const cfg = { ...getConfig(serverId, { includeSecret: true }), ...override };
-  if (!cfg.model) throw httpError(409, 'The wizard has no model configured');
+  if (!cfg.model) throw httpError(409, 'The chatbot has no model configured');
   const history = persist && cfg.retentionDays > 0 ? recentConversation(serverId, player) : [];
   const tools = allowPowers ? wizardPowers.toolsFor(cfg, player, prompt) : [];
   const powerGuard = tools.length
@@ -380,7 +380,7 @@ async function complete(serverId, player, prompt, options = {}) {
 }
 
 async function testConnection(serverId, override) {
-  return complete(serverId, 'Admin', 'Reply with exactly: The wizard is ready.', {
+  return complete(serverId, 'Admin', 'Reply with exactly: The chatbot is ready.', {
     persist: false,
     override,
   });
@@ -470,12 +470,13 @@ function pruneOutreach(days = 90) {
 function renderOutreachMessage(template, cfg, player) {
   const replacements = {
     player: String(player),
+    chatbot: assistantLabel(cfg.invocationName),
     wizard: assistantLabel(cfg.invocationName),
     mention: `@${cfg.invocationName}`,
     minutes: String(cfg.checkinMinutes),
   };
   return normalizeOutreachMessage(template, DEFAULT_CHECKIN_MESSAGE)
-    .replace(/\{(player|wizard|mention|minutes)\}/gi, (_match, key) => replacements[key.toLowerCase()])
+    .replace(/\{(player|chatbot|wizard|mention|minutes)\}/gi, (_match, key) => replacements[key.toLowerCase()])
     .slice(0, 450);
 }
 
@@ -490,7 +491,7 @@ async function sendWizardText(serverId, cfg, target, text) {
 }
 
 function claimOutreach(serverId, player, sessionStartedAt, field, now) {
-  if (!['welcomed_at', 'checked_in_at'].includes(field)) throw new Error('Invalid Wizard outreach field');
+  if (!['welcomed_at', 'checked_in_at'].includes(field)) throw new Error('Invalid chatbot outreach field');
   db.run(
     `INSERT OR IGNORE INTO wizard_outreach (server_id, player, session_started_at)
      VALUES (?, ?, ?)`,

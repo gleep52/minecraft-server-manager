@@ -5,6 +5,25 @@ All notable changes to this project are documented here. The format is based on
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Each push is cut as a new release with
 its own dated entry.
 
+## [0.15.0] - 2026-08-28
+
+### Changed
+
+- Standardized the integration's user-facing terminology on **chatbot**: Chatbot settings,
+  persona, powers, transcripts, status messages, validation errors, and power-audit summaries.
+  The configured invocation remains the in-game speaker name, with `@wizard` and the playful
+  wizard persona still serving as the defaults.
+- Renamed the **Minecraft testers** UI group to **Basic users**. Stable database columns, API
+  fields, routes, and event types retain their existing `wizard`/`powerTesters` identifiers for
+  backward compatibility.
+- Added `{chatbot}` as the preferred outreach-template variable; `{wizard}` remains supported for
+  existing saved messages.
+
+### Documentation
+
+- Added a concise technical overview covering player behavior, the security model, implementation
+  files, and the exact SQLite/host locations for configuration and transcript data.
+
 ## [0.14.1] - 2026-08-28
 
 ### Changed

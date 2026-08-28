@@ -1,7 +1,7 @@
 'use strict';
 
 // Cross-player powers are reserved for a second, explicit allowlist. Existing
-// power testers retain self-only behavior until an admin names controllers.
+// Existing Basic users (stored as power testers) retain self-only behavior until an admin names controllers.
 
 function up(db) {
   db.exec(`

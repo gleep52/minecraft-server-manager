@@ -1,7 +1,7 @@
 'use strict';
 
 // Admin-only configuration, diagnostics, and transcript access for the
-// per-server conversational wizard.
+// per-server conversational chatbot. The wizard route name is retained for API compatibility.
 
 const express = require('express');
 const { z } = require('zod');

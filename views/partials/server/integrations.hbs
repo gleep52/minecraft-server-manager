@@ -4,7 +4,7 @@
   <div class="card p-4 lg:col-span-2" id="ig-wizard">
     <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
       <div>
-        <h3 class="flex items-center gap-2 font-semibold">{{{icon 'sparkles' 'size-4 text-link'}}} Wizard chatbot</h3>
+        <h3 class="flex items-center gap-2 font-semibold">{{{icon 'sparkles' 'size-4 text-link'}}} Chatbot settings</h3>
         <p class="mt-1 text-xs text-ink-faint">Players invoke this chatbot with <code class="rounded bg-inset px-1">@{{integrations.wizard.invocationName}}</code>. Configuration and transcripts are visible only to admins.</p>
       </div>
       <span class="msm-toggle"><input type="checkbox" id="ig-wz-enabled" {{#if integrations.wizard.enabled}}checked{{/if}}><span></span></span>
@@ -52,7 +52,7 @@
       </div>
 
       <div>
-        <label class="label" for="ig-wz-prompt">Wizard persona and system prompt</label>
+        <label class="label" for="ig-wz-prompt">Chatbot persona and system prompt</label>
         <textarea class="input min-h-72 font-mono text-xs leading-5" id="ig-wz-prompt" maxlength="12000">{{integrations.wizard.systemPrompt}}</textarea>
         <p class="help">This is sent as the system message for this server. Powers are exposed as fixed, validated tools—never raw console commands.</p>
       </div>
@@ -70,7 +70,7 @@
         <div>
           <label class="label" for="ig-wz-welcome-message">Join greeting</label>
           <textarea class="input min-h-24 text-xs" id="ig-wz-welcome-message" maxlength="400">{{integrations.wizard.welcomeMessage}}</textarea>
-          <p class="help">Broadcast once when a player joins. Variables: <code>{player}</code>, <code>{wizard}</code>, and <code>{mention}</code>.</p>
+          <p class="help">Broadcast once when a player joins. Variables: <code>{player}</code>, <code>{chatbot}</code>, and <code>{mention}</code>. The older <code>{wizard}</code> variable remains supported.</p>
         </div>
         <div>
           <label class="label" for="ig-wz-checkin-message">Playtime check-in</label>
@@ -97,26 +97,26 @@
     <div class="mt-5 rounded-md border border-line bg-inset p-4">
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h4 class="font-semibold">Wizard powers <span class="text-xs font-normal text-warn">Experimental</span></h4>
-          <p class="help">Testers receive self/world powers. Controllers receive separately validated powers that may affect another online player. Everyone else remains conversation-only.</p>
+          <h4 class="font-semibold">Chatbot powers <span class="text-xs font-normal text-warn">Experimental</span></h4>
+          <p class="help">Basic users receive self/world powers. Controllers receive separately validated powers that may affect another online player. Everyone else remains conversation-only.</p>
         </div>
         <label class="flex items-center gap-2 text-sm"><span>Enable powers</span><span class="msm-toggle"><input type="checkbox" id="ig-wz-powers-enabled" {{#if integrations.wizard.powersEnabled}}checked{{/if}}><span></span></span></label>
       </div>
       <div class="mt-4 grid gap-4 lg:grid-cols-4">
         <div>
-          <label class="label" for="ig-wz-testers">Minecraft testers</label>
+          <label class="label" for="ig-wz-testers">Basic users</label>
           <textarea class="input min-h-28 font-mono text-xs" id="ig-wz-testers" placeholder="Gleep52&#10;PlayerA">{{{joinLines integrations.wizard.powerTesters}}}</textarea>
           <p class="help">One exact player name per line. Maximum 50.</p>
         </div>
         <div>
           <label class="label" for="ig-wz-controllers">Power controllers</label>
           <textarea class="input min-h-28 font-mono text-xs" id="ig-wz-controllers" placeholder="Gleep52">{{{joinLines integrations.wizard.powerControllers}}}</textarea>
-          <p class="help">Only these exact players may affect another online player. Their gifts may use any valid item ID, but still obey the quantity limit. Add them to Minecraft testers too if they should retain self/world powers.</p>
+          <p class="help">Only these exact players may affect another online player. Their gifts may use any valid item ID, but still obey the quantity limit. Add them to Basic users too if they should retain self/world powers.</p>
         </div>
         <div>
           <label class="label" for="ig-wz-gifts">Allowed gifts</label>
           <textarea class="input min-h-28 font-mono text-xs" id="ig-wz-gifts">{{{joinLines integrations.wizard.giftItems}}}</textarea>
-          <p class="help">One namespaced item ID per line. Restricts gifts that testers give themselves; power controllers may give other players any valid vanilla or modded item.</p>
+          <p class="help">One namespaced item ID per line. Restricts gifts that Basic users give themselves; power controllers may give other players any valid vanilla or modded item.</p>
         </div>
         <div class="space-y-3">
           <label class="flex items-center gap-2 text-sm"><input class="msm-check" type="checkbox" id="ig-wz-dry-run" {{#if integrations.wizard.powersDryRun}}checked{{/if}}> Dry run (audit only; change nothing)</label>
@@ -135,7 +135,7 @@
     </div>
 
     <div class="mt-4 flex flex-wrap items-center gap-2">
-      <button class="btn btn-primary" id="ig-wz-save">Save wizard</button>
+      <button class="btn btn-primary" id="ig-wz-save">Save chatbot</button>
       <button class="btn" id="ig-wz-test">Test connection</button>
       <button class="btn" id="ig-wz-transcripts">Refresh this server's transcripts</button>
       <button class="btn" id="ig-wz-power-audit">Refresh power audit</button>

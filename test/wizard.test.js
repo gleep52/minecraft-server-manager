@@ -32,7 +32,7 @@ test.after(async () => {
   await app.stop();
 });
 
-test('wizard configuration and transcripts are admin-only', async () => {
+test('chatbot configuration and transcripts are admin-only', async () => {
   for (const cookie of [viewerCookie, operatorCookie]) {
     assert.equal((await app.req('GET', `/api/servers/${serverId}/wizard`, { cookie })).status, 403);
     assert.equal((await app.req('GET', `/api/servers/${serverId}/wizard/transcripts`, { cookie })).status, 403);
@@ -44,7 +44,8 @@ test('wizard configuration and transcripts are admin-only', async () => {
 
   const adminPage = await app.req('GET', `/servers/${serverId}/integrations`, { cookie: adminCookie });
   const operatorPage = await app.req('GET', `/servers/${serverId}/integrations`, { cookie: operatorCookie });
-  assert.match(adminPage.text, /Wizard chatbot/);
+  assert.match(adminPage.text, /Chatbot settings/);
+  assert.match(adminPage.text, /Basic users/);
   assert.match(adminPage.text, /Refresh this server's transcripts/);
   assert.match(adminPage.text, /Refresh power audit/);
   assert.match(adminPage.text, /Player outreach/);
@@ -57,13 +58,14 @@ test('wizard configuration and transcripts are admin-only', async () => {
     'minecraft:torch',
     'minecraft:arrow',
   ]);
-  assert.doesNotMatch(operatorPage.text, /Wizard chatbot/);
+  assert.doesNotMatch(operatorPage.text, /Chatbot settings/);
 });
 
 test('per-server config encrypts the API key and defaults retention to seven days', async () => {
   const initial = await app.req('GET', `/api/servers/${serverId}/wizard`, { cookie: adminCookie });
   assert.equal(initial.json.wizard.retentionDays, 7);
   assert.equal(initial.json.wizard.invocationName, 'wizard');
+  assert.match(initial.json.wizard.systemPrompt, /ancient, playful wizard/);
   assert.equal(initial.json.wizard.welcomeEnabled, true);
   assert.equal(initial.json.wizard.checkinMinutes, 15);
   assert.equal(initial.json.wizard.conversationMinutes, 5);
@@ -449,7 +451,7 @@ test('join greetings and playtime check-ins send once per player session', async
     systemPrompt: 'Test',
     retentionDays: 7,
     welcomeEnabled: true,
-    welcomeMessage: 'Welcome {player}; I am {wizard}. Use {mention}.',
+    welcomeMessage: 'Welcome {player}; I am {chatbot}. Use {mention}.',
     checkinMinutes: 15,
     checkinMessage: '{player}, it has been {minutes} minutes. Need help from {wizard}?',
     conversationMinutes: 5,
@@ -465,6 +467,10 @@ test('join greetings and playtime check-ins send once per player session', async
     target: '@a',
     text: 'Welcome Gleep52; I am Bubba. Use @bubba.',
   });
+  assert.equal(
+    wizard.renderOutreachMessage('Legacy name: {wizard}.', wizard.getConfig(serverId), 'Gleep52'),
+    'Legacy name: Bubba.'
+  );
 
   db.run('INSERT INTO player_sessions (server_id, player, started_at) VALUES (?, ?, ?)', serverId, 'Gleep52', joinedAt);
   const now = new Date('2026-08-28T12:16:00.000Z');
